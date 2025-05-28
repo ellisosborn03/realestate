@@ -25,4 +25,16 @@ if response.status_code == 200:
     print(data)
 else:
     print(f"Error: {response.status_code}")
-    print(response.text) 
+    print(response.text)
+
+# Fetch AVM details
+url_avm = "https://api.gateway.attomdata.com/propertyapi/v1.0.0/attomavm/detail"
+response_avm = requests.get(url_avm, headers=headers, params=params)
+
+# Check if the AVM request was successful
+if response_avm.status_code == 200:
+    data_avm = response_avm.json()
+    print(data_avm)
+else:
+    print(f"Error: {response_avm.status_code}")
+    print(response_avm.text) 
