@@ -1,14 +1,14 @@
 import requests
 
 # ATTOM API endpoint and headers
-url = "https://api.gateway.attomdata.com/propertyapi/v1.0.0/saleshistory/detail"
+url = "https://api.gateway.attomdata.com/propertyapi/v1.0.0/property/detail"
 headers = {
     "accept": "application/json",
     "apikey": "ad91f2f30426f1ee54aec35791aaa044"  # Replace with your actual API key
 }
 
 # Address to search
-address = "4544 Radnor St, Detroit Michigan"
+address = "254 Shore Court, Fort Lauderdale, Florida 33308"
 
 # Parameters for the request
 params = {
