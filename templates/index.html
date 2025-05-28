@@ -1,0 +1,137 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+    <title>Excel Property Uploader</title>
+    <style>
+        body { font-family: Arial, sans-serif; background: #f7f7f7; margin: 0; padding: 0; }
+        .container { max-width: 700px; margin: 40px auto; background: #fff; border-radius: 8px; box-shadow: 0 2px 8px rgba(0,0,0,0.1); padding: 32px; }
+        h1 { text-align: center; color: #333; }
+        form { display: flex; flex-direction: column; align-items: center; margin-bottom: 24px; }
+        input[type=file] { margin-bottom: 16px; }
+        button { background: #007bff; color: #fff; border: none; padding: 10px 24px; border-radius: 4px; cursor: pointer; font-size: 16px; }
+        button:disabled { background: #aaa; }
+        #loadingOverlay { display: none; position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; background: rgba(255,255,255,0.7); z-index: 1000; align-items: center; justify-content: center; }
+        #loadingOverlay span { font-size: 2em; color: #007bff; }
+        #error { color: #c00; text-align: center; margin-bottom: 16px; }
+        table { width: 100%; border-collapse: collapse; margin-top: 24px; }
+        th, td { border: 1px solid #ddd; padding: 8px; }
+        th { background: #f0f0f0; }
+        tr:nth-child(even) { background: #fafafa; }
+        #fileDropdown { margin-top: 16px; margin-bottom: 16px; }
+    </style>
+</head>
+<body>
+    <div id="loadingOverlay"><span>Loading...</span></div>
+    <div class="container">
+        <h1>Upload Excel Files</h1>
+        <div id="error"></div>
+        <form id="uploadForm">
+            <input type="file" id="fileInput" name="file" accept=".xlsx,.xls" multiple required />
+            <button type="submit">Upload</button>
+        </form>
+        <select id="fileDropdown" style="display:none;"></select>
+        <div id="results"></div>
+    </div>
+    <script>
+        const form = document.getElementById('uploadForm');
+        const fileInput = document.getElementById('fileInput');
+        const errorDiv = document.getElementById('error');
+        const resultsDiv = document.getElementById('results');
+        const loadingOverlay = document.getElementById('loadingOverlay');
+        const fileDropdown = document.getElementById('fileDropdown');
+
+        let uploadedFiles = {};
+        let aggregatedData = [];
+
+        form.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            errorDiv.textContent = '';
+            resultsDiv.innerHTML = '';
+            loadingOverlay.style.display = 'flex';
+            const files = fileInput.files;
+            if (!files.length) {
+                errorDiv.textContent = 'Please select at least one file.';
+                loadingOverlay.style.display = 'none';
+                return;
+            }
+            uploadedFiles = {};
+            aggregatedData = [];
+            let uploadCount = 0;
+            for (let i = 0; i < files.length; i++) {
+                const formData = new FormData();
+                formData.append('file', files[i]);
+                try {
+                    const response = await fetch('/upload', {
+                        method: 'POST',
+                        body: formData
+                    });
+                    const result = await response.json();
+                    if (result.success) {
+                        uploadedFiles[files[i].name] = result.data;
+                        aggregatedData = aggregatedData.concat(result.data);
+                        uploadCount++;
+                    } else {
+                        errorDiv.textContent = `Error uploading ${files[i].name}: ${result.error || 'Upload failed.'}`;
+                    }
+                } catch (err) {
+                    errorDiv.textContent = `Error uploading ${files[i].name}: An error occurred during upload.`;
+                }
+            }
+            loadingOverlay.style.display = 'none';
+            if (uploadCount > 0) {
+                populateDropdown();
+                fileDropdown.style.display = 'block';
+                displayResults(aggregatedData);
+            }
+        });
+
+        function populateDropdown() {
+            fileDropdown.innerHTML = '';
+            const aggOption = document.createElement('option');
+            aggOption.value = '__aggregated__';
+            aggOption.textContent = 'Aggregated View';
+            fileDropdown.appendChild(aggOption);
+            Object.keys(uploadedFiles).forEach(name => {
+                const opt = document.createElement('option');
+                opt.value = name;
+                opt.textContent = name;
+                fileDropdown.appendChild(opt);
+            });
+        }
+
+        fileDropdown.addEventListener('change', (e) => {
+            const val = fileDropdown.value;
+            if (val === '__aggregated__') {
+                displayResults(aggregatedData);
+            } else {
+                displayResults(uploadedFiles[val]);
+            }
+        });
+
+        function displayResults(data) {
+            if (!data || !data.length) {
+                resultsDiv.innerHTML = '<p>No data found in file.</p>';
+                return;
+            }
+            const keys = Object.keys(data[0]);
+            let html = '<table><thead><tr>';
+            keys.forEach(key => {
+                html += `<th>${key}</th>`;
+            });
+            html += '</tr></thead><tbody>';
+            data.forEach(row => {
+                html += '<tr>';
+                keys.forEach(key => {
+                    html += `<td>${row[key] ?? ''}</td>`;
+                });
+                html += '</tr>';
+            });
+            html += '</tbody></table>';
+            resultsDiv.innerHTML = html;
+        }
+    </script>
+</body>
+</html> 
