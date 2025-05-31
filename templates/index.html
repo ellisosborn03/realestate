@@ -446,8 +446,14 @@
                     const rawContent = sanitizeText(row[col] || '');
                     const cellContent = truncateText(rawContent);
                     const shouldShowCopy = rawContent.length > 20;
+                    let tooltip = '';
+                    if (col === 'Valuation' && rawContent === 'N/A') {
+                        tooltip = ' title="No data available for this property."';
+                    } else {
+                        tooltip = ` title="${rawContent}"`;
+                    }
                     html += `<td>
-                        <span class="cell-content" title="${rawContent}">${cellContent}</span>
+                        <span class="cell-content"${tooltip}>${cellContent}</span>
                         ${shouldShowCopy ? `<button class="copy-btn" onclick="copyText('${rawContent.replace(/'/g, "\\'")}')">Copy</button>` : ''}
                     </td>`;
                 });

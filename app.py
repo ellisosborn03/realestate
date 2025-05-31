@@ -79,38 +79,51 @@ def upload_file():
         logging.error(traceback.format_exc())
         return jsonify({'success': False, 'error': str(e)}), 500
 
-def clean_address1(address1):
-    # USPS suffix mapping
-    suffix_map = {
-        'DR': 'Drive',
-        'ST': 'Street',
-        'AVE': 'Avenue',
-        'LN': 'Lane',
-        'CT': 'Court',
-        'RD': 'Road',
-        'BLVD': 'Boulevard',
-        'PKWY': 'Parkway',
-        'TER': 'Terrace',
-        'CIR': 'Circle',
-        'PL': 'Place',
-        'HWY': 'Highway',
-        'TRL': 'Trail',
-        'SQ': 'Square',
-        'WAY': 'Way',
+def clean_address1(address: str) -> str:
+    """
+    Clean and normalize US residential address1 for ATTOM API queries.
+    Always strip trailing LOT, UNIT, or APT suffixes and their values.
+    """
+    if not address:
+        return ""
+    address = address.strip().upper()
+    address = re.sub(r"\s{2,}", " ", address)            # Remove double spaces
+    address = re.sub(r"\.\s*$", "", address)             # Remove trailing periods
+    # Normalize unit/apartment/lot spacing
+    address = re.sub(r"\bAPT(\d+)", r"APT \1", address)
+    address = re.sub(r"\bUNIT(\s?)([A-Z0-9]+)", r"UNIT \2", address)
+    address = re.sub(r"\bLOT(\s?)(\d+)", r"LOT \2", address)
+    # Remove extra commas or trailing punctuation
+    address = address.replace(",,", ",").rstrip(",. ")
+    # USPS suffix normalization
+    usps_suffix_map = {
+        r"\bDR\b": "DRIVE",
+        r"\bRD\b": "ROAD",
+        r"\bST\b": "STREET",
+        r"\bCT\b": "COURT",
+        r"\bLN\b": "LANE",
+        r"\bAVE\b": "AVENUE",
+        r"\bBLVD\b": "BOULEVARD",
+        r"\bPL\b": "PLACE",
+        r"\bPKWY\b": "PARKWAY",
+        r"\bTER\b": "TERRACE",
+        r"\bCIR\b": "CIRCLE",
     }
-    s = address1.strip().replace(',,', ',').replace('&', 'and')
-    s = re.sub(r'\s+\.', '', s)  # Remove space+period
-    s = re.sub(r'\.$', '', s)     # Remove trailing period
-    # Normalize suffixes at end or after number
-    for abbr, full in suffix_map.items():
-        # Match: space + abbr (with optional period) at end, or after a number
-        s = re.sub(rf'(\b\d+\s+.*?\b){abbr}\.?$', rf'\1{full}', s, flags=re.IGNORECASE)
-        s = re.sub(rf'\b{abbr}\.?$', full, s, flags=re.IGNORECASE)
-    return s
+    for pattern, replacement in usps_suffix_map.items():
+        address = re.sub(pattern, replacement, address)
+    # Always strip trailing LOT/UNIT/APT and value
+    address = re.sub(r'\b(UNIT|APT|LOT)\s*[A-Z0-9#\-]+$', '', address).strip().rstrip(',')
+    return address.strip()
 
 def is_valid_florida_address(address2):
     # Ensures format is like: "PALM BEACH GARDENS, FL 33418"
     return bool(re.match(r'^([A-Z\s]+),\s?FL\s\d{5}$', address2.upper()))
+
+def strip_unit_or_lot_suffix(address: str) -> str:
+    """
+    Remove unit or lot info from the end of an address string for retrying ATTOM lookups.
+    """
+    return re.sub(r'\b(UNIT|APT|LOT)\s*[A-Z0-9#\-]+$', '', address).strip().rstrip(',')
 
 @app.route('/cross-reference', methods=['POST'])
 def cross_reference():
@@ -155,6 +168,24 @@ def cross_reference():
             data = resp.json()
             logging.info(f"ATTOM API response status: {resp.status_code}, body: {data}")
             if data.get("status", {}).get("msg") == "SuccessWithoutResult" or not data.get("property"):
+                # Fallback: retry without unit/lot/apt suffix if present
+                if re.search(r'\b(UNIT|APT|LOT)\s*[A-Z0-9#\-]+$', address1):
+                    fallback_address = strip_unit_or_lot_suffix(address1)
+                    logger.info(f"Retrying ATTOM with stripped address: {fallback_address}")
+                    params["address1"] = fallback_address
+                    resp2 = requests.get(url, headers=headers, params=params)
+                    data2 = resp2.json()
+                    logging.info(f"ATTOM fallback response status: {resp2.status_code}, body: {data2}")
+                    if resp2.status_code == 200 and data2.get("property"):
+                        prop = (data2.get("property") or [{}])[0]
+                        avm = prop.get("avm", {})
+                        value = avm.get("amount", {}).get("value", None)
+                        results.append({
+                            'address': f"{fallback_address}, {address2}",
+                            'Valuation': value if value is not None else 'N/A',
+                            'match_type': 'partial'
+                        })
+                        continue
                 logger.warning(f"No AVM result for: {address1}, {address2}")
                 results.append({'address': f"{address1}, {address2}", 'Valuation': 'N/A'})
                 continue
@@ -186,8 +217,8 @@ def cross_reference():
 
 if __name__ == '__main__':
     try:
-        # Use werkzeug's run_simple for better stability
-        run_simple('127.0.0.1', 5002, app, use_debugger=True, use_reloader=True)
+        # Always run on port 5001 for local dev
+        run_simple('127.0.0.1', 5001, app, use_debugger=True, use_reloader=True)
     except Exception as e:
         logger.error(f"Failed to start server: {str(e)}")
         logger.error(traceback.format_exc()) 
