@@ -2,17 +2,39 @@ import os
 import logging
 import traceback
 import requests
+import atexit
 from flask import Flask, request, render_template, jsonify
 import pandas as pd
 import numpy as np
+from werkzeug.serving import run_simple
+import re
+from urllib.parse import quote_plus
 
 app = Flask(__name__)
 app.config['UPLOAD_FOLDER'] = 'uploads'
 
-logging.basicConfig(level=logging.DEBUG)
+# Configure logging
+logging.basicConfig(
+    level=logging.DEBUG,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
+logger = logging.getLogger(__name__)
 
 if not os.path.exists(app.config['UPLOAD_FOLDER']):
     os.makedirs(app.config['UPLOAD_FOLDER'])
+
+def cleanup():
+    """Cleanup function to be called on shutdown"""
+    logger.info("Shutting down Flask application...")
+    # Add any cleanup code here
+
+atexit.register(cleanup)
+
+@app.errorhandler(Exception)
+def handle_error(error):
+    logger.error(f"Unhandled error: {str(error)}")
+    logger.error(traceback.format_exc())
+    return jsonify({'success': False, 'error': 'Internal server error'}), 500
 
 def clean_nan(obj):
     if isinstance(obj, dict):
@@ -32,10 +54,12 @@ def index():
 def upload_file():
     logging.info('Received upload request')
     try:
+        logging.info(f"Request files: {request.files}")
         if 'file' not in request.files:
             logging.error('No file part in request')
             return jsonify({'success': False, 'error': 'No file part'}), 400
         file = request.files['file']
+        logging.info(f"Uploaded filename: {file.filename}")
         if file.filename == '':
             logging.error('No selected file')
             return jsonify({'success': False, 'error': 'No selected file'}), 400
@@ -48,11 +72,20 @@ def upload_file():
         logging.info(f'Successfully read Excel file. Shape: {df.shape}')
         data = df.to_dict(orient='records')
         cleaned_data = clean_nan(data)
+        logging.info(f"Returning {len(cleaned_data)} records from upload.")
         return jsonify({'success': True, 'data': cleaned_data})
     except Exception as e:
         logging.error(f'Error processing file: {e}')
         logging.error(traceback.format_exc())
         return jsonify({'success': False, 'error': str(e)}), 500
+
+def clean_address1(address1):
+    # Removes trailing punctuation, repeated commas, and replaces '&'
+    return address1.strip().replace(',,', ',').rstrip(',').replace('&', 'and').replace(' .', '').replace('.', '')
+
+def is_valid_florida_address(address2):
+    # Ensures format is like: "PALM BEACH GARDENS, FL 33418"
+    return bool(re.match(r'^([A-Z\s]+),\s?FL\s\d{5}$', address2.upper()))
 
 @app.route('/cross-reference', methods=['POST'])
 def cross_reference():
@@ -64,24 +97,21 @@ def cross_reference():
 
         results = []
         for row in data:
-            logging.info(f"Row: {row}")
-            for handler in logging.root.handlers:
-                handler.flush()
-            street = row.get('street address', '').strip()
-            csz = row.get('CSZ', '').strip()
-            if not street or not csz or csz == ',' or csz == '':
-                results.append({'address': street, 'Valuation': 'N/A'})
+            raw_address1 = row.get('street address') or row.get('Street Address') or ''
+            raw_address2 = row.get('CSZ', '')
+            logging.info(f"Original row: {row}")
+            address1 = clean_address1(raw_address1)
+            address2 = raw_address2.strip().upper().replace(' ,', ',').replace('  ', ' ')
+            logging.info(f"Cleaned address1: '{address1}', address2: '{address2}'")
+
+            if not address1 or not address2:
+                logger.warning(f"Missing address1 or address2 after cleaning. address1: '{address1}', address2: '{address2}'")
+                results.append({'address': address1, 'Valuation': 'N/A'})
                 continue
-            try:
-                city_state_zip = csz.split(',')
-                city = city_state_zip[0].strip()
-                state_zip = city_state_zip[1].strip().split(' ')
-                state = state_zip[0]
-                zip_code = state_zip[1]
-                address1 = street
-                address2 = f"{city}, {state} {zip_code}"
-            except Exception:
-                results.append({'address': street, 'Valuation': 'N/A'})
+
+            if not is_valid_florida_address(address2):
+                logger.warning(f"Invalid FL address format: {address2}")
+                results.append({'address': f"{address1}, {address2}", 'Valuation': 'N/A'})
                 continue
 
             logging.info(f"Querying ATTOM for: address1={address1}, address2={address2}")
@@ -97,8 +127,13 @@ def cross_reference():
                 "accept": "application/json"
             }
             resp = requests.get(url, headers=headers, params=params)
+            data = resp.json()
+            logging.info(f"ATTOM API response status: {resp.status_code}, body: {data}")
+            if data.get("status", {}).get("msg") == "SuccessWithoutResult" or not data.get("property"):
+                logger.warning(f"No AVM result for: {address1}, {address2}")
+                results.append({'address': f"{address1}, {address2}", 'Valuation': 'N/A'})
+                continue
             if resp.status_code == 200:
-                data = resp.json()
                 prop = (data.get("property") or [{}])[0]
                 avm = prop.get("avm", {})
                 value = avm.get("amount", {}).get("value", None)
@@ -125,5 +160,10 @@ def cross_reference():
         return jsonify({'success': False, 'error': str(e)}), 500
 
 if __name__ == '__main__':
-    app.run(debug=True, port=5001) 
+    try:
+        # Use werkzeug's run_simple for better stability
+        run_simple('127.0.0.1', 5001, app, use_debugger=True, use_reloader=True)
+    except Exception as e:
+        logger.error(f"Failed to start server: {str(e)}")
+        logger.error(traceback.format_exc()) 
 

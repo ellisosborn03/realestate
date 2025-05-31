@@ -1,14 +1,10 @@
-import os
 import requests
-from dotenv import load_dotenv
 
-load_dotenv()
+ATTOM_API_KEY = "ad91f2f30426f1ee54aec35791aaa044"
 
-ATTOM_API_KEY = os.getenv('ATTOM_API_KEY')
-
-def get_attom_property_details(address1, address2):
-    """Get property details from ATTOM API."""
-    url = "https://api.gateway.attomdata.com/propertyapi/v1.0.0/property/detail"
+def get_attom_avm(address1, address2):
+    """Get AVM details from ATTOM API."""
+    url = "https://api.gateway.attomdata.com/propertyapi/v1.0.0/attomavm/detail"
     params = {
         'address1': address1,
         'address2': address2
@@ -26,10 +22,24 @@ def get_attom_property_details(address1, address2):
         return {'error': str(e)}
 
 if __name__ == '__main__':
-    # Test address: 17938 Lake Azure Way, Boca Raton 33496, United States
-    address1 = '17938 Lake Azure Way'
-    address2 = 'Boca Raton 33496'
+    test_addresses = [
+        ('19943 DEAN DR', 'BOCA RATON, FL 33434'),
+        ('4888 KIRKWOOD ROAD', 'LAKE WORTH, FL 33461'),
+        ('5933 AZALEA CIR', 'West Palm Beach, FL 33415'),
+        ('6775 TURTLE POINT DR', 'Lake Worth, FL 33467')
+    ]
     
-    print(f"Querying ATTOM for property details: {address1}, {address2}")
-    result = get_attom_property_details(address1, address2)
-    print(f"Response: {result}") 
+    for address1, address2 in test_addresses:
+        print(f"\nQuerying ATTOM for AVM details: {address1}, {address2}")
+        result = get_attom_avm(address1, address2)
+        if 'error' in result:
+            print(f"Error: {result['error']}")
+        else:
+            prop = (result.get("property") or [{}])[0]
+            avm = prop.get("avm", {})
+            value = avm.get("amount", {}).get("value", "N/A")
+            confidence = avm.get("confidenceScore", "N/A")
+            last_updated = avm.get("lastUpdated", "N/A")
+            print(f"Value: {value}")
+            print(f"Confidence: {confidence}")
+            print(f"Last Updated: {last_updated}") 
