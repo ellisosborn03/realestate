@@ -184,6 +184,7 @@
 
         let uploadedFiles = {};
         let aggregatedData = [];
+        let selectedMetrics = [];
 
         const DEFAULT_ALWAYS_COLUMNS = [
             'Distress Level',
@@ -229,7 +230,7 @@
                 populateDropdown();
                 document.getElementById('valuationBtn').style.display = 'block';
                 document.getElementById('distressBtn').style.display = 'block';
-                displayResults(aggregatedData);
+                displayResults(aggregatedData.slice(0, 10));
                 populateMetricsDropdown(aggregatedData);
             }
         });
@@ -251,18 +252,20 @@
         function populateMetricsDropdown(data) {
             const metricsSelect = document.getElementById('metricsShown');
             metricsSelect.innerHTML = '';
-            
-            const availableColumns = getStandardColumns().filter(col => 
-                data.some(row => row[col] !== undefined && row[col] !== '')
-            );
-
+            // Get all unique keys from the data
+            const allKeys = new Set();
+            data.forEach(row => Object.keys(row).forEach(k => allKeys.add(k)));
+            // Always show default columns first
+            const availableColumns = Array.from(allKeys);
             availableColumns.forEach(col => {
                 const opt = document.createElement('option');
                 opt.value = col;
                 opt.textContent = col;
-                opt.selected = true;
+                opt.selected = DEFAULT_ALWAYS_COLUMNS.includes(col) || selectedMetrics.includes(col);
                 metricsSelect.appendChild(opt);
             });
+            // Set selectedMetrics to the current selection
+            selectedMetrics = getSelectedMetrics();
         }
 
         function getSelectedMetrics() {
@@ -304,6 +307,7 @@
             displayResults(getFilteredRows());
         });
         document.getElementById('metricsShown').addEventListener('change', () => {
+            selectedMetrics = getSelectedMetrics();
             displayResults(getFilteredRows());
         });
         document.getElementById('valuationBtn').addEventListener('click', async () => {
@@ -312,35 +316,26 @@
                 alert('No data to cross-reference.');
                 return;
             }
-            try {
-                const response = await fetch('/cross-reference', {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json'
-                    },
-                    body: JSON.stringify(dataToSend)
-                });
-                const result = await response.json();
-                if (result.success) {
-                    // Get the number of properties to show
-                    const numProperties = document.getElementById('numProperties').value;
-                    let filteredResults = result.data;
-                    // Apply number of properties filter
-                    if (numProperties !== 'all') {
-                        const limit = parseInt(numProperties);
-                        filteredResults = filteredResults.slice(0, limit);
+            // Render the table with N/A for all valuations
+            displayResults(dataToSend);
+
+            // For each row, fire off a request and update the table as results come in
+            dataToSend.forEach(async (row, idx) => {
+                try {
+                    const response = await fetch('/cross-reference-single', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(row)
+                    });
+                    if (!response.ok) return;
+                    const result = await response.json();
+                    if (result.success && result.data) {
+                        updateValuationCell(idx, result.data.Valuation);
                     }
-                    // Remove duplicates after filtering
-                    const uniqueResults = removeDuplicateAddresses(filteredResults);
-                    // Display the filtered and deduplicated results
-                    displayCrossReferenceResults(uniqueResults);
-                } else {
-                    alert(result.error);
+                } catch (e) {
+                    // Optionally handle error
                 }
-            } catch (error) {
-                console.error('Error:', error);
-                alert('Error during cross-reference.');
-            }
+            });
         });
         document.getElementById('distressBtn').addEventListener('click', async () => {
             alert('Distress scoring coming soon!');
@@ -395,7 +390,8 @@
         }
 
         function getAvailableColumns(processedData) {
-            return DEFAULT_ALWAYS_COLUMNS;
+            // Only show selected metrics
+            return selectedMetrics.length ? selectedMetrics : DEFAULT_ALWAYS_COLUMNS;
         }
 
         function sanitizeText(text) {
@@ -462,6 +458,28 @@
             html += '</tbody></table>';
             document.getElementById('tableContainer').innerHTML = html;
             console.log('Table rendered.');
+        }
+
+        // Helper to update the valuation cell for a given row index
+        function updateValuationCell(rowIdx, newVal) {
+            const table = document.querySelector('#tableContainer table');
+            if (!table) return;
+            const tbody = table.querySelector('tbody');
+            if (!tbody) return;
+            const tr = tbody.children[rowIdx];
+            if (!tr) return;
+            // Find the Valuation column index
+            const ths = table.querySelectorAll('thead th');
+            let valIdx = -1;
+            ths.forEach((th, i) => {
+                if (th.textContent.trim() === 'Valuation') valIdx = i;
+            });
+            if (valIdx === -1) return;
+            const td = tr.children[valIdx];
+            if (!td) return;
+            // Update the cell content
+            td.querySelector('.cell-content').textContent = newVal !== undefined ? newVal : 'N/A';
+            td.title = newVal !== undefined ? newVal : 'N/A';
         }
     </script>
 </body>

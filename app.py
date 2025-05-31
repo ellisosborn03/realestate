@@ -130,14 +130,17 @@ def cross_reference():
     logging.info('Received cross-reference request')
     try:
         data = request.json
+        logging.info(f"Input data: {data}")
         if not data or not isinstance(data, list):
+            logging.error(f"Invalid data format: {data}")
             return jsonify({'success': False, 'error': 'Invalid data format'}), 400
 
         results = []
-        for row in data:
+        for idx, row in enumerate(data):
+            logging.info(f"Row {idx}: {row}")
             raw_address1 = row.get('street address') or row.get('Street Address') or ''
             raw_address2 = row.get('CSZ', '')
-            logging.info(f"Original row: {row}")
+            logging.info(f"Raw address1: '{raw_address1}', raw address2: '{raw_address2}'")
             address1 = clean_address1(raw_address1)
             address2 = raw_address2.strip().upper().replace(' ,', ',').replace('  ', ' ')
             logging.info(f"Cleaned address1: '{address1}', address2: '{address2}'")
@@ -164,22 +167,35 @@ def cross_reference():
                 "apikey": "ad91f2f30426f1ee54aec35791aaa044",
                 "accept": "application/json"
             }
-            resp = requests.get(url, headers=headers, params=params)
-            data = resp.json()
-            logging.info(f"ATTOM API response status: {resp.status_code}, body: {data}")
+            try:
+                resp = requests.get(url, headers=headers, params=params)
+                logging.info(f"ATTOM API request params: {params}")
+                data = resp.json()
+                logging.info(f"ATTOM API response status: {resp.status_code}, body: {data}")
+            except Exception as e:
+                logging.error(f"Exception during ATTOM API request: {e}")
+                results.append({'address': f"{address1}, {address2}", 'Valuation': 'N/A'})
+                continue
             if data.get("status", {}).get("msg") == "SuccessWithoutResult" or not data.get("property"):
                 # Fallback: retry without unit/lot/apt suffix if present
                 if re.search(r'\b(UNIT|APT|LOT)\s*[A-Z0-9#\-]+$', address1):
                     fallback_address = strip_unit_or_lot_suffix(address1)
                     logger.info(f"Retrying ATTOM with stripped address: {fallback_address}")
                     params["address1"] = fallback_address
-                    resp2 = requests.get(url, headers=headers, params=params)
-                    data2 = resp2.json()
-                    logging.info(f"ATTOM fallback response status: {resp2.status_code}, body: {data2}")
+                    try:
+                        resp2 = requests.get(url, headers=headers, params=params)
+                        logging.info(f"ATTOM fallback request params: {params}")
+                        data2 = resp2.json()
+                        logging.info(f"ATTOM fallback response status: {resp2.status_code}, body: {data2}")
+                    except Exception as e:
+                        logging.error(f"Exception during ATTOM fallback request: {e}")
+                        results.append({'address': f"{fallback_address}, {address2}", 'Valuation': 'N/A'})
+                        continue
                     if resp2.status_code == 200 and data2.get("property"):
                         prop = (data2.get("property") or [{}])[0]
                         avm = prop.get("avm", {})
                         value = avm.get("amount", {}).get("value", None)
+                        logging.info(f"Fallback extracted value: {value}")
                         results.append({
                             'address': f"{fallback_address}, {address2}",
                             'Valuation': value if value is not None else 'N/A',
@@ -209,9 +225,70 @@ def cross_reference():
                     'address': f"{address1}, {address2}",
                     'Valuation': 'N/A'
                 })
+        logging.info(f"Final results list: {results}")
         return jsonify({'success': True, 'data': results})
     except Exception as e:
         logging.error(f'Error in cross-reference: {e}')
+        logging.error(traceback.format_exc())
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+@app.route('/cross-reference-single', methods=['POST'])
+def cross_reference_single():
+    logging.info('Received cross-reference-single request')
+    try:
+        row = request.json
+        logging.info(f"cross-reference-single input: {row}")
+        if not isinstance(row, dict):
+            logging.error('cross-reference-single: Invalid data format')
+            return jsonify({'success': False, 'error': 'Invalid data format'}), 400
+        data = [row]
+        results = []
+        for idx, row in enumerate(data):
+            raw_address1 = row.get('street address') or row.get('Street Address') or ''
+            raw_address2 = row.get('CSZ', '')
+            address1 = clean_address1(raw_address1)
+            address2 = raw_address2.strip().upper().replace(' ,', ',').replace('  ', ' ')
+            logging.info(f"cross-reference-single cleaned address1: '{address1}', address2: '{address2}'")
+            if not address1 or not address2 or not is_valid_florida_address(address2):
+                logging.warning(f"cross-reference-single: Invalid or missing address for row: {row}")
+                results.append({'address': f"{address1}, {address2}", 'Valuation': 'N/A'})
+                continue
+            params = {"address1": address1, "address2": address2}
+            url = "https://api.gateway.attomdata.com/propertyapi/v1.0.0/attomavm/detail"
+            headers = {
+                "apikey": "ad91f2f30426f1ee54aec35791aaa044",
+                "accept": "application/json"
+            }
+            try:
+                resp = requests.get(url, headers=headers, params=params)
+                logging.info(f"cross-reference-single ATTOM API request params: {params}")
+                data = resp.json()
+                logging.info(f"cross-reference-single ATTOM API response status: {resp.status_code}, body: {data}")
+            except Exception as e:
+                logging.error(f"cross-reference-single Exception during ATTOM API request: {e}")
+                results.append({'address': f"{address1}, {address2}", 'Valuation': 'N/A'})
+                continue
+            if data.get("status", {}).get("msg") == "SuccessWithoutResult" or not data.get("property"):
+                logging.warning(f"cross-reference-single: No AVM result for: {address1}, {address2}")
+                results.append({'address': f"{address1}, {address2}", 'Valuation': 'N/A'})
+                continue
+            if resp.status_code == 200:
+                prop = (data.get("property") or [{}])[0]
+                avm = prop.get("avm", {})
+                value = avm.get("amount", {}).get("value", None)
+                logging.info(f"cross-reference-single ATTOM AVM for {address1}, {address2}: {avm}")
+                logging.info(f"cross-reference-single Extracted value: {value}")
+                results.append({
+                    'address': f"{address1}, {address2}",
+                    'Valuation': value if value is not None else 'N/A'
+                })
+            else:
+                logging.error(f'cross-reference-single ATTOM API error for address {address1}: {resp.status_code} {resp.text}')
+                results.append({'address': f"{address1}, {address2}", 'Valuation': 'N/A'})
+        logging.info(f"cross-reference-single final result: {results[0] if results else None}")
+        return jsonify({'success': True, 'data': results[0]})
+    except Exception as e:
+        logging.error(f'cross-reference-single error: {e}')
         logging.error(traceback.format_exc())
         return jsonify({'success': False, 'error': str(e)}), 500
 
