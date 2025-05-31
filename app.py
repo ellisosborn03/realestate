@@ -154,7 +154,7 @@ def cross_reference():
             logging.error(f"Invalid data format: {data}")
             return jsonify({'success': False, 'error': 'Invalid data format'}), 400
 
-        results = []
+        results_dict = {}  # Deduplicate by oneLine address
         for idx, row in enumerate(data):
             logging.info(f"Row {idx}: {row}")
             raw_address1 = row.get('street address') or row.get('Street Address') or ''
@@ -164,87 +164,28 @@ def cross_reference():
             address2 = raw_address2.strip().upper().replace(' ,', ',').replace('  ', ' ')
             logging.info(f"Cleaned address1: '{address1}', address2: '{address2}'")
 
-            if not address1 or not address2:
-                logger.warning(f"Missing address1 or address2 after cleaning. address1: '{address1}', address2: '{address2}'")
-                results.append({'address': address1, 'Valuation': 'N/A'})
+            if not address1 or not address2 or not is_valid_florida_address(address2):
+                results_dict[f"{address1}, {address2}"] = 'N/A'
                 continue
 
-            if not is_valid_florida_address(address2):
-                logger.warning(f"Invalid FL address format: {address2}")
-                results.append({'address': f"{address1}, {address2}", 'Valuation': 'N/A'})
-                continue
+            response = query_attom_avm(address1, address2)
+            logging.info(f"ATTOM response: {response}")
+            one_line = address1 + ', ' + address2
+            value = 'N/A'
+            if response and response.get('status', {}).get('code') == 0 and response.get('status', {}).get('msg') == 'SuccessWithResult':
+                prop = response.get('property', [{}])[0]
+                one_line = prop.get('address', {}).get('oneLine', one_line)
+                value = prop.get('avm', {}).get('amount', {}).get('value', 'N/A')
+            elif response and (response.get('status', {}).get('code') == 400 or response.get('status', {}).get('msg') == 'SuccessWithoutResult' or not response.get('property')):
+                value = 'N/A'
+            results_dict[one_line] = value
 
-            logging.info(f"Querying ATTOM for: address1={address1}, address2={address2}")
-            for handler in logging.root.handlers:
-                handler.flush()
-            params = {
-                "address1": address1,
-                "address2": address2
-            }
-            url = "https://api.gateway.attomdata.com/propertyapi/v1.0.0/attomavm/detail"
-            headers = {
-                "apikey": "ad91f2f30426f1ee54aec35791aaa044",
-                "accept": "application/json"
-            }
-            try:
-                resp = requests.get(url, headers=headers, params=params)
-                logging.info(f"ATTOM API request params: {params}")
-                data = resp.json()
-                logging.info(f"ATTOM API response status: {resp.status_code}, body: {data}")
-            except Exception as e:
-                logging.error(f"Exception during ATTOM API request: {e}")
-                results.append({'address': f"{address1}, {address2}", 'Valuation': 'N/A'})
-                continue
-            if data.get("status", {}).get("msg") == "SuccessWithoutResult" or not data.get("property"):
-                # Fallback: retry without unit/lot/apt suffix if present
-                if re.search(r'\b(UNIT|APT|LOT)\s*[A-Z0-9#\-]+$', address1):
-                    fallback_address = strip_unit_or_lot_suffix(address1)
-                    logger.info(f"Retrying ATTOM with stripped address: {fallback_address}")
-                    params["address1"] = fallback_address
-                    try:
-                        resp2 = requests.get(url, headers=headers, params=params)
-                        logging.info(f"ATTOM fallback request params: {params}")
-                        data2 = resp2.json()
-                        logging.info(f"ATTOM fallback response status: {resp2.status_code}, body: {data2}")
-                    except Exception as e:
-                        logging.error(f"Exception during ATTOM fallback request: {e}")
-                        results.append({'address': f"{fallback_address}, {address2}", 'Valuation': 'N/A'})
-                        continue
-                    if resp2.status_code == 200 and data2.get("property"):
-                        prop = (data2.get("property") or [{}])[0]
-                        avm = prop.get("avm", {})
-                        value = avm.get("amount", {}).get("value", None)
-                        logging.info(f"Fallback extracted value: {value}")
-                        results.append({
-                            'address': f"{fallback_address}, {address2}",
-                            'Valuation': value if value is not None else 'N/A',
-                            'match_type': 'partial'
-                        })
-                        continue
-                logger.warning(f"No AVM result for: {address1}, {address2}")
-                results.append({'address': f"{address1}, {address2}", 'Valuation': 'N/A'})
-                continue
-            if resp.status_code == 200:
-                prop = (data.get("property") or [{}])[0]
-                avm = prop.get("avm", {})
-                value = avm.get("amount", {}).get("value", None)
-                logging.info(f"ATTOM AVM for {address1}, {address2}: {avm}")
-                logging.info(f"Extracted value: {value}")
-                for handler in logging.root.handlers:
-                    handler.flush()
-                results.append({
-                    'address': f"{address1}, {address2}",
-                    'Valuation': value if value is not None else 'N/A'
-                })
-            else:
-                logging.error(f'ATTOM API error for address {address1}: {resp.status_code} {resp.text}')
-                for handler in logging.root.handlers:
-                    handler.flush()
-                results.append({
-                    'address': f"{address1}, {address2}",
-                    'Valuation': 'N/A'
-                })
-        logging.info(f"Final results list: {results}")
+        # Output as sorted list of dicts for frontend
+        results = [
+            {'address': addr, 'Valuation': val}
+            for addr, val in sorted(results_dict.items())
+        ]
+        logging.info(f"Final deduped results list: {results}")
         return jsonify({'success': True, 'data': results})
     except Exception as e:
         logging.error(f'Error in cross-reference: {e}')
