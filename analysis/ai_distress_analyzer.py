@@ -2,521 +2,540 @@
 
 import requests
 import json
-import time
-import re
 import sys
 import os
-from datetime import datetime, timedelta
-import asyncio
-import aiohttp
-from typing import Dict, List, Optional, Tuple
-from dataclasses import dataclass, asdict
-from dotenv import load_dotenv
-
-# Add src to path for imports
-sys.path.append('src')
-sys.path.append('src/services')
-
-load_dotenv()
-
-ATTOM_API_KEY = "ad91f2f30426f1ee54aec35791aaa044"
-GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY")
-
-@dataclass
-class DistressSignals:
-    """Comprehensive distress signal data structure"""
-    # Property basics
-    address: str = ""
-    property_value: float = 0
-    property_type: str = ""
-    year_built: int = 0
-    square_feet: int = 0
-    
-    # Financial distress indicators
-    tax_liens: bool = False
-    tax_lien_amount: float = 0
-    mechanic_liens: bool = False
-    foreclosure_status: str = "none"  # none, pre-foreclosure, auction, reo
-    days_on_market: int = 0
-    price_reductions: int = 0
-    original_list_price: float = 0
-    current_list_price: float = 0
-    
-    # Personal distress indicators
-    divorce_filing: bool = False
-    critical_illness_indicators: bool = False
-    job_loss_area: bool = False
-    owner_age_estimate: int = 0
-    
-    # Property condition indicators
-    code_violations: bool = False
-    unfinished_permits: bool = False
-    building_age_risk: bool = False  # >30 years in Florida
-    
-    # Area risk factors
-    median_area_income: float = 0
-    recent_sales_decline: bool = False
-    high_crime_area: bool = False
-    coastal_insurance_risk: bool = False
-    proximity_to_water: float = 0  # miles from coast
-    
-    # Market indicators
-    market_rent_potential: float = 0
-    absorption_rate: float = 0
-    median_days_on_market: int = 60
+import re
+from datetime import datetime
+import argparse
 
 class AIDistressAnalyzer:
-    """AI-powered comprehensive distress signal analyzer"""
+    """
+    AI-Powered Real Estate Distress Analysis using ChatGPT's latest model
+    Pulls comprehensive property data and gets expert AI assessment
+    """
     
-    def __init__(self):
-        self.attom_key = ATTOM_API_KEY
-        self.google_key = GOOGLE_API_KEY
-        self.session = requests.Session()
+    def __init__(self, openai_api_key=None):
+        self.attom_api_key = 'ad91f2f30426f1ee54aec35791aaa044'
+        self.openai_api_key = openai_api_key or os.getenv('OPENAI_API_KEY')
         
-    def split_address(self, full_address: str) -> Tuple[str, str]:
-        """Split full address into address1 and address2 for ATTOM API"""
-        parts = full_address.rsplit(',', 2)
-        
-        if len(parts) >= 3:
-            address1 = parts[0].strip()
-            city_state_zip = f"{parts[1].strip()}, {parts[2].strip()}"
-            return address1, city_state_zip
-        elif len(parts) == 2:
-            address1 = parts[0].strip()
-            city_state_zip = parts[1].strip()
-            return address1, city_state_zip
-        else:
-            return full_address, ""
+        if not self.openai_api_key:
+            print("❌ ERROR: OpenAI API key required. Set OPENAI_API_KEY environment variable or pass as parameter.")
+            sys.exit(1)
     
-    def get_attom_property_data(self, address1: str, address2: str) -> Dict:
-        """Get comprehensive ATTOM property data"""
-        print("🔍 Fetching ATTOM property data...")
+    def comprehensive_property_lookup(self, address1, address2):
+        """Pull maximum available data from ATTOM API across multiple endpoints"""
         
-        # AVM endpoint for valuation
-        avm_url = "https://api.gateway.attomdata.com/propertyapi/v1.0.0/attomavm/detail"
-        avm_headers = {"accept": "application/json", "apikey": self.attom_key}
-        avm_params = {"address1": address1, "address2": address2}
+        print(f"🔍 Analyzing: {address1}, {address2}")
+        print("-" * 60)
         
-        property_data = {}
+        property_data = {
+            'address': f"{address1}, {address2}",
+            'analysis_timestamp': datetime.now().isoformat(),
+            'data_sources': []
+        }
         
-        try:
-            resp = self.session.get(avm_url, params=avm_params, headers=avm_headers, timeout=10)
-            if resp.status_code == 200:
-                data = resp.json()
-                if data.get("status", {}).get("code") == 0:
-                    properties = data.get("property", [])
-                    if properties:
-                        prop = properties[0]
-                        property_data.update({
-                            "avm_value": prop.get("avm", {}).get("amount", {}).get("value", 0),
-                            "address": prop.get("address", {}).get("oneLine", ""),
-                        })
-        except Exception as e:
-            print(f"    AVM Error: {e}")
+        # 1. AVM (Automated Valuation Model)
+        avm_data = self.get_attom_avm(address1, address2)
+        if avm_data:
+            property_data['avm'] = avm_data
+            property_data['data_sources'].append('ATTOM_AVM')
+            print(f"✅ AVM Data: Current Value ${avm_data.get('current_value', 'N/A'):,}")
         
-        # Property Detail endpoint for comprehensive data
-        detail_url = "https://search.onboard-apis.com/propertyapi/v1.0.0/property/detail"
-        detail_headers = {"Accept": "application/json", "apikey": self.attom_key}
-        detail_params = {"address1": address1, "address2": address2, "format": "json"}
+        # 2. Property Detail (comprehensive property info)
+        detail_data = self.get_attom_property_detail(address1, address2)
+        if detail_data:
+            property_data['property_detail'] = detail_data
+            property_data['data_sources'].append('ATTOM_DETAIL')
+            print(f"✅ Property Detail: {detail_data.get('property_type', 'N/A')} - {detail_data.get('year_built', 'N/A')}")
         
-        try:
-            resp = self.session.get(detail_url, params=detail_params, headers=detail_headers, timeout=15)
-            if resp.status_code == 200:
-                data = resp.json()
-                properties = data.get("property", [])
-                if properties:
-                    prop = properties[0]
-                    
-                    # Extract comprehensive data
-                    address_info = prop.get("address", {})
-                    assessment = prop.get("assessment", {})
-                    building = prop.get("building", {})
-                    lot = prop.get("lot", {})
-                    
-                    property_data.update({
-                        "property_type": building.get("propertyType", ""),
-                        "year_built": building.get("yearBuilt", 0),
-                        "bedrooms": building.get("rooms", {}).get("beds", 0),
-                        "bathrooms": building.get("rooms", {}).get("baths", 0),
-                        "square_feet": building.get("size", {}).get("livingsize", 0),
-                        "lot_size": lot.get("lotsize1", 0),
-                        "market_value": assessment.get("market", {}).get("mktttlvalue", 0),
-                        "assessed_value": assessment.get("assessed", {}).get("assdttlvalue", 0),
-                        "tax_amount": assessment.get("tax", {}).get("taxamt", 0),
-                    })
-        except Exception as e:
-            print(f"    Property Detail Error: {e}")
+        # 3. Sales History
+        sales_data = self.get_attom_sales_history(address1, address2)
+        if sales_data:
+            property_data['sales_history'] = sales_data
+            property_data['data_sources'].append('ATTOM_SALES')
+            print(f"✅ Sales History: {len(sales_data.get('sales', []))} transactions")
         
+        # 4. Tax Assessment
+        tax_data = self.get_attom_tax_assessment(address1, address2)
+        if tax_data:
+            property_data['tax_assessment'] = tax_data
+            property_data['data_sources'].append('ATTOM_TAX')
+            print(f"✅ Tax Data: ${tax_data.get('assessed_value', 'N/A'):,} assessed")
+        
+        # 5. Market Data & Comparables
+        market_data = self.get_attom_market_data(address1, address2)
+        if market_data:
+            property_data['market_data'] = market_data
+            property_data['data_sources'].append('ATTOM_MARKET')
+            print(f"✅ Market Data: {market_data.get('median_sale_price', 'N/A')} median price")
+        
+        # 6. Foreclosure & Distress Signals
+        distress_data = self.get_attom_distress_data(address1, address2)
+        if distress_data:
+            property_data['distress_indicators'] = distress_data
+            property_data['data_sources'].append('ATTOM_DISTRESS')
+            print(f"✅ Distress Signals: {len(distress_data.get('indicators', []))} found")
+        
+        print(f"\n📊 Data Sources: {', '.join(property_data['data_sources'])}")
         return property_data
     
-    def analyze_public_records(self, address: str, property_data: Dict) -> Dict:
-        """Analyze public records for distress indicators"""
-        print("📋 Analyzing public records...")
+    def get_attom_avm(self, address1, address2):
+        """Get ATTOM AVM data with comprehensive valuation info"""
+        url = "https://api.gateway.attomdata.com/propertyapi/v1.0.0/attomavm/detail"
+        params = {'address1': address1, 'address2': address2}
+        headers = {'accept': 'application/json', 'apikey': self.attom_api_key}
         
-        signals = {}
-        
-        # Tax lien analysis (simulated with property tax data)
-        tax_amount = property_data.get("tax_amount", 0)
-        assessed_value = property_data.get("assessed_value", 0)
-        
-        if assessed_value > 0:
-            tax_rate = (tax_amount / assessed_value) * 100
-            # High tax burden indicates potential distress
-            if tax_rate > 2.5:  # >2.5% is high for Florida
-                signals["tax_stress"] = True
-                signals["tax_burden_pct"] = tax_rate
-        
-        # Building age risk (Florida specific)
-        year_built = property_data.get("year_built", 0)
-        current_year = datetime.now().year
-        building_age = current_year - year_built if year_built > 0 else 0
-        
-        signals["building_age"] = building_age
-        signals["building_age_risk"] = building_age > 30  # High risk in Florida
-        
-        # Property type risk analysis
-        property_type = property_data.get("property_type", "").lower()
-        high_risk_types = ["condo", "commercial", "mobile", "manufactured"]
-        signals["property_type_risk"] = any(risk_type in property_type for risk_type in high_risk_types)
-        
-        return signals
-    
-    def analyze_market_conditions(self, address: str, property_data: Dict) -> Dict:
-        """Analyze local market conditions"""
-        print("📊 Analyzing market conditions...")
-        
-        # Extract ZIP code for market analysis
-        zip_match = re.search(r'\b(\d{5})\b', address)
-        zip_code = zip_match.group(1) if zip_match else None
-        
-        market_data = {}
-        
-        if zip_code:
-            # Simulate market analysis based on known Florida market data
-            florida_market_conditions = {
-                "33403": {"absorption_rate": 0.25, "median_dom": 45, "price_trend": "stable"},  # Lake Park
-                "33463": {"absorption_rate": 0.22, "median_dom": 50, "price_trend": "rising"},  # Greenacres  
-                "33418": {"absorption_rate": 0.15, "median_dom": 85, "price_trend": "declining"},  # PB Gardens
-                "33415": {"absorption_rate": 0.18, "median_dom": 75, "price_trend": "stable"},  # WPB
-                "33467": {"absorption_rate": 0.12, "median_dom": 95, "price_trend": "declining"},  # Lake Worth
-                "33460": {"absorption_rate": 0.14, "median_dom": 88, "price_trend": "declining"},  # Lake Worth
-            }
+        try:
+            resp = requests.get(url, params=params, headers=headers, timeout=15)
+            resp.raise_for_status()
+            data = resp.json()
             
-            market_info = florida_market_conditions.get(zip_code, {
-                "absorption_rate": 0.18, "median_dom": 70, "price_trend": "stable"
-            })
-            
-            market_data.update({
-                "zip_code": zip_code,
-                "absorption_rate": market_info["absorption_rate"],
-                "median_days_on_market": market_info["median_dom"],
-                "price_trend": market_info["price_trend"],
-                "market_stress": market_info["absorption_rate"] < 0.15,
-            })
-        
-        # Coastal risk analysis for Florida
-        coastal_cities = ["lake park", "palm beach", "west palm beach", "delray", "boca raton"]
-        is_coastal = any(city in address.lower() for city in coastal_cities)
-        
-        market_data.update({
-            "coastal_location": is_coastal,
-            "insurance_risk": is_coastal,  # Coastal = higher insurance risk
-            "hurricane_risk": is_coastal,
-        })
-        
-        return market_data
+            if data.get('status', {}).get('code') == 0:
+                prop = data.get('property', [{}])[0]
+                avm = prop.get('avm', {})
+                
+                return {
+                    'current_value': avm.get('amount', {}).get('value'),
+                    'value_high': avm.get('amount', {}).get('high'),
+                    'value_low': avm.get('amount', {}).get('low'),
+                    'confidence_score': avm.get('condCode'),
+                    'forecast_standard_deviation': avm.get('fsd'),
+                    'last_updated': avm.get('eventDate'),
+                    'property_type': prop.get('lot', {}).get('propertyType'),
+                    'building_area': prop.get('building', {}).get('size', {}).get('bldgSize'),
+                    'lot_size': prop.get('lot', {}).get('lotSize1')
+                }
+        except Exception as e:
+            print(f"⚠️  AVM lookup failed: {e}")
+            return None
     
-    def search_distress_indicators(self, address: str, property_data: Dict) -> Dict:
-        """Search for personal distress indicators using AI inference"""
-        print("🔍 Searching for distress indicators...")
+    def get_attom_property_detail(self, address1, address2):
+        """Get comprehensive property details"""
+        url = "https://api.gateway.attomdata.com/propertyapi/v1.0.0/property/detail"
+        params = {'address1': address1, 'address2': address2}
+        headers = {'accept': 'application/json', 'apikey': self.attom_api_key}
         
-        # This would ideally use web scraping, public records APIs, etc.
-        # For now, we'll use AI-powered inference based on available data
-        
-        distress_indicators = {}
-        
-        # Infer potential distress from property characteristics
-        property_value = property_data.get("avm_value", 0) or property_data.get("market_value", 0)
-        property_type = property_data.get("property_type", "").lower()
-        year_built = property_data.get("year_built", 0)
-        
-        # Age-based risk inference
-        current_year = datetime.now().year
-        building_age = current_year - year_built if year_built > 0 else 0
-        
-        # AI inference rules based on property characteristics
-        if "condo" in property_type and building_age > 20:
-            distress_indicators.update({
-                "special_assessment_risk": True,
-                "hoa_issues_likely": True,
-                "maintenance_burden": "high"
-            })
-        
-        if property_value > 0:
-            # High-value properties with older construction = maintenance stress
-            if property_value > 400000 and building_age > 25:
-                distress_indicators["maintenance_stress"] = True
+        try:
+            resp = requests.get(url, params=params, headers=headers, timeout=15)
+            resp.raise_for_status()
+            data = resp.json()
             
-            # Low-value properties = potential financial distress
-            if property_value < 200000:
-                distress_indicators["financial_stress_likely"] = True
-        
-        # Location-based distress inference
-        if "lake worth" in address.lower():
-            distress_indicators.update({
-                "economic_stress_area": True,
-                "lower_income_area": True
-            })
-        
-        if "palm beach gardens" in address.lower() and "pga" in address.lower():
-            distress_indicators.update({
-                "commercial_property": True,
-                "business_stress_risk": True
-            })
-        
-        return distress_indicators
+            if data.get('status', {}).get('code') == 0:
+                prop = data.get('property', [{}])[0]
+                
+                return {
+                    'year_built': prop.get('summary', {}).get('yearBuilt'),
+                    'bedrooms': prop.get('building', {}).get('rooms', {}).get('beds'),
+                    'bathrooms': prop.get('building', {}).get('rooms', {}).get('bathstotal'),
+                    'property_type': prop.get('summary', {}).get('proptype'),
+                    'property_sub_type': prop.get('summary', {}).get('propsubtype'),
+                    'stories': prop.get('building', {}).get('construction', {}).get('storiesNumber'),
+                    'pool': prop.get('building', {}).get('pool', {}).get('pooltype'),
+                    'garage': prop.get('building', {}).get('parking', {}).get('garagetype'),
+                    'heating': prop.get('building', {}).get('interior', {}).get('heatingtype'),
+                    'cooling': prop.get('building', {}).get('interior', {}).get('coolingtype'),
+                    'foundation': prop.get('building', {}).get('construction', {}).get('foundationtype'),
+                    'roof_material': prop.get('building', {}).get('construction', {}).get('rooftype'),
+                    'exterior_walls': prop.get('building', {}).get('construction', {}).get('walltype'),
+                    'last_sale_date': prop.get('sale', {}).get('amount', {}).get('salerecdate'),
+                    'last_sale_price': prop.get('sale', {}).get('amount', {}).get('saleamt'),
+                    'owner_occupied': prop.get('summary', {}).get('owneroccupied'),
+                    'owner_name': prop.get('owner', {}).get('owner1', {}).get('fullName'),
+                    'mail_address': prop.get('owner', {}).get('mailingAddress', {}).get('oneLine')
+                }
+        except Exception as e:
+            print(f"⚠️  Property detail lookup failed: {e}")
+            return None
     
-    def calculate_ai_distress_score(self, signals: DistressSignals) -> Dict:
-        """AI-powered distress score calculation with weighted factors"""
-        print("🎯 Calculating AI distress score...")
+    def get_attom_sales_history(self, address1, address2):
+        """Get sales history and transaction patterns"""
+        url = "https://api.gateway.attomdata.com/propertyapi/v1.0.0/saleshistory/detail"
+        params = {'address1': address1, 'address2': address2}
+        headers = {'accept': 'application/json', 'apikey': self.attom_api_key}
         
-        score = 0
-        risk_factors = []
+        try:
+            resp = requests.get(url, params=params, headers=headers, timeout=15)
+            resp.raise_for_status()
+            data = resp.json()
+            
+            if data.get('status', {}).get('code') == 0:
+                sales = data.get('property', [{}])[0].get('sale', [])
+                
+                sales_list = []
+                for sale in sales:
+                    sales_list.append({
+                        'sale_date': sale.get('amount', {}).get('salerecdate'),
+                        'sale_price': sale.get('amount', {}).get('saleamt'),
+                        'transaction_type': sale.get('saleTransType'),
+                        'deed_type': sale.get('deedType'),
+                        'seller_name': sale.get('seller', {}).get('fullName'),
+                        'buyer_name': sale.get('buyer', {}).get('fullName')
+                    })
+                
+                return {
+                    'sales': sales_list,
+                    'transaction_count': len(sales_list),
+                    'price_appreciation': self.calculate_price_appreciation(sales_list)
+                }
+        except Exception as e:
+            print(f"⚠️  Sales history lookup failed: {e}")
+            return None
+    
+    def get_attom_tax_assessment(self, address1, address2):
+        """Get tax assessment and burden information"""
+        url = "https://api.gateway.attomdata.com/propertyapi/v1.0.0/assessment/detail"
+        params = {'address1': address1, 'address2': address2}
+        headers = {'accept': 'application/json', 'apikey': self.attom_api_key}
         
-        # Financial Stress Indicators (40% weight)
-        if hasattr(signals, 'tax_liens') and signals.tax_liens:
-            score += 15
-            risk_factors.append("Tax liens present")
+        try:
+            resp = requests.get(url, params=params, headers=headers, timeout=15)
+            resp.raise_for_status()
+            data = resp.json()
+            
+            if data.get('status', {}).get('code') == 0:
+                prop = data.get('property', [{}])[0]
+                assessment = prop.get('assessment', {})
+                
+                return {
+                    'assessed_value': assessment.get('assessed', {}).get('assdTtlValue'),
+                    'market_value': assessment.get('market', {}).get('mktTtlValue'),
+                    'tax_year': assessment.get('tax', {}).get('taxYear'),
+                    'tax_amount': assessment.get('tax', {}).get('taxAmt'),
+                    'assessment_ratio': assessment.get('assessed', {}).get('assdTtlValue') / assessment.get('market', {}).get('mktTtlValue', 1) if assessment.get('market', {}).get('mktTtlValue') else None,
+                    'land_value': assessment.get('assessed', {}).get('assdLandValue'),
+                    'improvement_value': assessment.get('assessed', {}).get('assdImpValue')
+                }
+        except Exception as e:
+            print(f"⚠️  Tax assessment lookup failed: {e}")
+            return None
+    
+    def get_attom_market_data(self, address1, address2):
+        """Get local market conditions and comparables"""
+        # Extract ZIP for market analysis
+        zip_match = re.search(r'\b(\d{5})\b', address2)
+        if not zip_match:
+            return None
+            
+        zip_code = zip_match.group(1)
         
-        if hasattr(signals, 'foreclosure_status') and signals.foreclosure_status != "none":
-            score += 20
-            risk_factors.append(f"Foreclosure status: {signals.foreclosure_status}")
+        url = "https://api.gateway.attomdata.com/propertyapi/v1.0.0/sale/snapshot"
+        params = {'postalcode': zip_code, 'propertytype': 'SFR,CON,TH'}
+        headers = {'accept': 'application/json', 'apikey': self.attom_api_key}
         
-        if signals.days_on_market > signals.median_days_on_market * 1.5:
-            score += 10
-            risk_factors.append(f"Extended time on market ({signals.days_on_market} days)")
+        try:
+            resp = requests.get(url, params=params, headers=headers, timeout=15)
+            resp.raise_for_status()
+            data = resp.json()
+            
+            if data.get('status', {}).get('code') == 0:
+                results = data.get('results', [])
+                if results:
+                    market = results[0]
+                    return {
+                        'zip_code': zip_code,
+                        'median_sale_price': market.get('medianSalePrice'),
+                        'average_sale_price': market.get('avgSalePrice'),
+                        'sales_count_12m': market.get('salesCount12Mo'),
+                        'median_days_on_market': market.get('medianDaysOnMarket'),
+                        'price_per_sqft': market.get('medianPricePerSqFt'),
+                        'inventory_count': market.get('inventoryCount'),
+                        'absorption_rate': market.get('absorptionRate')
+                    }
+        except Exception as e:
+            print(f"⚠️  Market data lookup failed: {e}")
+            return None
+    
+    def get_attom_distress_data(self, address1, address2):
+        """Check for foreclosure and distress indicators"""
+        indicators = []
         
-        if signals.price_reductions > 2:
-            score += 8
-            risk_factors.append(f"Multiple price reductions ({signals.price_reductions})")
+        # Check for preforeclosure
+        url = "https://api.gateway.attomdata.com/propertyapi/v1.0.0/preforeclosure/detail"
+        params = {'address1': address1, 'address2': address2}
+        headers = {'accept': 'application/json', 'apikey': self.attom_api_key}
         
-        # Property Condition Indicators (25% weight)
-        if signals.building_age_risk:
-            score += 8
-            risk_factors.append("Building >30 years old (Florida risk)")
-        
-        if hasattr(signals, 'code_violations') and signals.code_violations:
-            score += 10
-            risk_factors.append("Code violations present")
-        
-        if hasattr(signals, 'unfinished_permits') and signals.unfinished_permits:
-            score += 7
-            risk_factors.append("Unfinished permits")
-        
-        # Personal Distress Indicators (20% weight)
-        if hasattr(signals, 'divorce_filing') and signals.divorce_filing:
-            score += 12
-            risk_factors.append("Recent divorce filing")
-        
-        if signals.owner_age_estimate > 75:
-            score += 8
-            risk_factors.append("Elderly owner (>75 years)")
-        
-        if hasattr(signals, 'critical_illness_indicators') and signals.critical_illness_indicators:
-            score += 10
-            risk_factors.append("Critical illness indicators")
-        
-        # Market/Area Risk Indicators (15% weight)
-        if signals.coastal_insurance_risk:
-            score += 6
-            risk_factors.append("Coastal insurance risk")
-        
-        if hasattr(signals, 'high_crime_area') and signals.high_crime_area:
-            score += 5
-            risk_factors.append("High crime area")
-        
-        if signals.absorption_rate < 0.15:
-            score += 7
-            risk_factors.append(f"Poor market absorption ({signals.absorption_rate:.2f})")
-        
-        # Bonus factors for multiple indicators
-        if len(risk_factors) >= 5:
-            score += 5
-            risk_factors.append("Multiple risk factors present")
-        
-        # Cap at 100
-        final_score = min(score, 100)
-        
-        # Risk level determination
-        if final_score >= 75:
-            risk_level = "CRITICAL"
-        elif final_score >= 60:
-            risk_level = "HIGH"
-        elif final_score >= 40:
-            risk_level = "MEDIUM"
-        elif final_score >= 25:
-            risk_level = "LOW"
-        else:
-            risk_level = "MINIMAL"
+        try:
+            resp = requests.get(url, params=params, headers=headers, timeout=15)
+            if resp.status_code == 200:
+                data = resp.json()
+                if data.get('status', {}).get('code') == 0:
+                    indicators.append({
+                        'type': 'preforeclosure',
+                        'status': 'active',
+                        'details': data.get('property', [{}])[0]
+                    })
+        except Exception:
+            pass
         
         return {
-            "distress_score": final_score,
-            "risk_level": risk_level,
-            "risk_factors": risk_factors,
-            "total_factors": len(risk_factors),
-            "confidence": min(95, 60 + len(risk_factors) * 5)  # Higher confidence with more factors
+            'indicators': indicators,
+            'distress_level': 'high' if len(indicators) > 0 else 'low'
         }
     
-    def analyze_property_distress(self, address: str) -> Dict:
-        """Complete AI-powered property distress analysis"""
-        print(f"\n🤖 AI DISTRESS ANALYSIS: {address}")
-        print("=" * 90)
+    def calculate_price_appreciation(self, sales_list):
+        """Calculate price appreciation from sales history"""
+        if len(sales_list) < 2:
+            return None
+            
+        # Sort by date
+        sorted_sales = sorted(sales_list, key=lambda x: x.get('sale_date', ''))
         
-        # Step 1: Parse address
-        address1, address2 = self.split_address(address)
-        if not address2:
-            return {"error": "Could not parse address", "address": address}
+        if len(sorted_sales) >= 2:
+            oldest = sorted_sales[0]
+            newest = sorted_sales[-1]
+            
+            old_price = oldest.get('sale_price', 0)
+            new_price = newest.get('sale_price', 0)
+            
+            if old_price > 0:
+                appreciation = ((new_price - old_price) / old_price) * 100
+                return round(appreciation, 2)
         
-        print(f"📍 Parsed: '{address1}' + '{address2}'")
+        return None
+    
+    def format_data_for_ai(self, property_data):
+        """Format comprehensive property data for ChatGPT analysis"""
         
-        # Step 2: Get ATTOM property data
-        property_data = self.get_attom_property_data(address1, address2)
+        formatted = f"""
+COMPREHENSIVE PROPERTY ANALYSIS REQUEST
+
+PROPERTY: {property_data['address']}
+ANALYSIS DATE: {property_data['analysis_timestamp']}
+DATA SOURCES: {', '.join(property_data['data_sources'])}
+
+=== VALUATION DATA ==="""
+
+        if 'avm' in property_data:
+            avm = property_data['avm']
+            formatted += f"""
+Current AVM Value: ${avm.get('current_value', 'N/A'):,}
+Value Range: ${avm.get('value_low', 'N/A'):,} - ${avm.get('value_high', 'N/A'):,}
+Confidence Score: {avm.get('confidence_score', 'N/A')}
+Forecast Std Dev: {avm.get('forecast_standard_deviation', 'N/A')}
+Last Updated: {avm.get('last_updated', 'N/A')}
+Building Size: {avm.get('building_area', 'N/A')} sq ft
+Lot Size: {avm.get('lot_size', 'N/A')} sq ft"""
+
+        if 'property_detail' in property_data:
+            detail = property_data['property_detail']
+            formatted += f"""
+
+=== PROPERTY CHARACTERISTICS ===
+Year Built: {detail.get('year_built', 'N/A')}
+Property Type: {detail.get('property_type', 'N/A')} ({detail.get('property_sub_type', 'N/A')})
+Bedrooms: {detail.get('bedrooms', 'N/A')}
+Bathrooms: {detail.get('bathrooms', 'N/A')}
+Stories: {detail.get('stories', 'N/A')}
+Pool: {detail.get('pool', 'None')}
+Garage: {detail.get('garage', 'N/A')}
+Heating: {detail.get('heating', 'N/A')}
+Cooling: {detail.get('cooling', 'N/A')}
+Foundation: {detail.get('foundation', 'N/A')}
+Roof: {detail.get('roof_material', 'N/A')}
+Exterior: {detail.get('exterior_walls', 'N/A')}
+Owner Occupied: {detail.get('owner_occupied', 'N/A')}
+Owner Name: {detail.get('owner_name', 'N/A')}
+Mailing Address: {detail.get('mail_address', 'Same as property' if detail.get('mail_address') == property_data['address'] else detail.get('mail_address', 'N/A'))}"""
+
+        if 'sales_history' in property_data:
+            sales = property_data['sales_history']
+            formatted += f"""
+
+=== SALES HISTORY ===
+Transaction Count: {sales.get('transaction_count', 0)}
+Price Appreciation: {sales.get('price_appreciation', 'N/A')}%"""
+            
+            for i, sale in enumerate(sales.get('sales', [])[:5]):  # Last 5 sales
+                formatted += f"""
+Sale #{i+1}: {sale.get('sale_date', 'N/A')} - ${sale.get('sale_price', 'N/A'):,} ({sale.get('transaction_type', 'N/A')})"""
+
+        if 'tax_assessment' in property_data:
+            tax = property_data['tax_assessment']
+            formatted += f"""
+
+=== TAX ASSESSMENT ===
+Tax Year: {tax.get('tax_year', 'N/A')}
+Assessed Value: ${tax.get('assessed_value', 'N/A'):,}
+Market Value: ${tax.get('market_value', 'N/A'):,}
+Annual Tax Amount: ${tax.get('tax_amount', 'N/A'):,}
+Assessment Ratio: {tax.get('assessment_ratio', 'N/A'):.2%}
+Land Value: ${tax.get('land_value', 'N/A'):,}
+Improvement Value: ${tax.get('improvement_value', 'N/A'):,}"""
+
+        if 'market_data' in property_data:
+            market = property_data['market_data']
+            formatted += f"""
+
+=== LOCAL MARKET CONDITIONS ===
+ZIP Code: {market.get('zip_code', 'N/A')}
+Median Sale Price: ${market.get('median_sale_price', 'N/A'):,}
+Average Sale Price: ${market.get('average_sale_price', 'N/A'):,}
+Sales Count (12mo): {market.get('sales_count_12m', 'N/A')}
+Median Days on Market: {market.get('median_days_on_market', 'N/A')}
+Price per Sq Ft: ${market.get('price_per_sqft', 'N/A')}
+Inventory Count: {market.get('inventory_count', 'N/A')}
+Absorption Rate: {market.get('absorption_rate', 'N/A')} months"""
+
+        if 'distress_indicators' in property_data:
+            distress = property_data['distress_indicators']
+            formatted += f"""
+
+=== DISTRESS INDICATORS ===
+Distress Level: {distress.get('distress_level', 'N/A').upper()}
+Active Indicators: {len(distress.get('indicators', []))}"""
+            
+            for indicator in distress.get('indicators', []):
+                formatted += f"""
+- {indicator.get('type', 'Unknown').upper()}: {indicator.get('status', 'N/A')}"""
+
+        return formatted
+
+    def analyze_with_chatgpt(self, formatted_data):
+        """Send formatted data to ChatGPT for expert analysis"""
         
-        if property_data.get('address'):
-            print(f"✅ Property found: {property_data['address']}")
-            if property_data.get('avm_value'):
-                print(f"💰 AVM Value: ${property_data['avm_value']:,}")
-        else:
-            print("❌ Limited ATTOM data - using inference")
-        
-        # Step 3: Analyze public records
-        public_records = self.analyze_public_records(address, property_data)
-        
-        # Step 4: Analyze market conditions  
-        market_data = self.analyze_market_conditions(address, property_data)
-        
-        # Step 5: Search for distress indicators
-        distress_indicators = self.search_distress_indicators(address, property_data)
-        
-        # Step 6: Compile all signals
-        signals = DistressSignals()
-        signals.address = address
-        signals.property_value = property_data.get('avm_value', 0) or property_data.get('market_value', 0)
-        signals.property_type = property_data.get('property_type', '')
-        signals.year_built = property_data.get('year_built', 0)
-        signals.square_feet = property_data.get('square_feet', 0)
-        
-        # Market data
-        signals.absorption_rate = market_data.get('absorption_rate', 0.18)
-        signals.median_days_on_market = market_data.get('median_days_on_market', 70)
-        signals.coastal_insurance_risk = market_data.get('insurance_risk', False)
-        
-        # Public records data
-        signals.building_age_risk = public_records.get('building_age_risk', False)
-        
-        # Mock some realistic days on market based on market conditions
-        if market_data.get('market_stress', False):
-            signals.days_on_market = int(signals.median_days_on_market * 1.8)
-        else:
-            signals.days_on_market = int(signals.median_days_on_market * 0.9)
-        
-        # AI inference for owner age (simplified)
-        if signals.property_value > 300000 and signals.year_built < 1990:
-            signals.owner_age_estimate = 68  # Typical long-term owner
-        else:
-            signals.owner_age_estimate = 45  # Typical homeowner age
-        
-        # Calculate AI distress score
-        result = self.calculate_ai_distress_score(signals)
-        
-        # Display results
-        score = result["distress_score"]
-        risk_level = result["risk_level"]
-        confidence = result["confidence"]
-        
-        # Risk level emoji
-        risk_emojis = {
-            "CRITICAL": "🔴🚨",
-            "HIGH": "🔴",
-            "MEDIUM": "🟡", 
-            "LOW": "🟡",
-            "MINIMAL": "🟢"
+        prompt = f"""You are an expert real estate investor specializing in residential properties with 20+ years of experience in distressed property acquisition. You have extensive knowledge of market conditions, property valuation, and distress indicators that affect investment potential.
+
+Please analyze the following comprehensive property data and provide your expert assessment:
+
+{formatted_data}
+
+ANALYSIS REQUIRED:
+
+1. DISTRESS SCORE (0-100): Based on all available data, what distress score would you assign? Consider factors like:
+   - Ownership patterns (absentee, multiple sales)
+   - Financial indicators (tax burden, assessment ratios)
+   - Market position (days on market, price vs. median)
+   - Property condition indicators
+   - Local market health
+
+2. CONFIDENCE LEVEL (0-100): How confident are you in this assessment given the data quality and completeness?
+
+3. VALUATION DISCOUNT (percentage): What discount from current market value would you expect due to distress factors?
+
+4. EXPLANATION (1-2 sentences): Provide a concise explanation of your reasoning for the scores.
+
+Please respond in this exact JSON format:
+{
+    "distress_score": [0-100],
+    "confidence_level": [0-100], 
+    "valuation_discount": "[X-Y%]",
+    "explanation": "[1-2 sentence explanation]"
+}"""
+
+        headers = {
+            'Authorization': f'Bearer {self.openai_api_key}',
+            'Content-Type': 'application/json'
         }
         
-        emoji = risk_emojis.get(risk_level, "⚪")
+        data = {
+            'model': 'gpt-4o',  # Latest model
+            'messages': [
+                {
+                    'role': 'user',
+                    'content': prompt
+                }
+            ],
+            'temperature': 0.3,  # Lower temperature for more consistent analysis
+            'max_tokens': 500
+        }
         
-        print(f"\n📊 AI ANALYSIS RESULTS:")
-        print(f"   {emoji} Distress Score: {score}/100")
-        print(f"   {emoji} Risk Level: {risk_level}")
-        print(f"   🎯 Confidence: {confidence}%")
-        print(f"   📋 Risk Factors Found: {result['total_factors']}")
+        try:
+            print("\n🤖 Sending data to ChatGPT for analysis...")
+            resp = requests.post('https://api.openai.com/v1/chat/completions', 
+                               headers=headers, json=data, timeout=30)
+            resp.raise_for_status()
+            
+            result = resp.json()
+            content = result['choices'][0]['message']['content']
+            
+            # Try to parse JSON response
+            try:
+                analysis = json.loads(content)
+                return analysis
+            except:
+                # If JSON parsing fails, return raw content
+                return {'raw_response': content}
+                
+        except Exception as e:
+            print(f"❌ ChatGPT API error: {e}")
+            return None
+
+    def analyze_property(self, address1, address2):
+        """Complete property analysis workflow"""
         
-        if result['risk_factors']:
-            print(f"\n⚠️  IDENTIFIED RISK FACTORS:")
-            for factor in result['risk_factors']:
-                print(f"   • {factor}")
+        print("🏠 AI-POWERED REAL ESTATE DISTRESS ANALYSIS")
+        print("=" * 80)
+        
+        # Step 1: Gather comprehensive data
+        property_data = self.comprehensive_property_lookup(address1, address2)
+        
+        if not property_data.get('data_sources'):
+            print("❌ No property data found. Please verify the address.")
+            return None
+        
+        # Step 2: Format for AI analysis
+        formatted_data = self.format_data_for_ai(property_data)
+        
+        # Step 3: Get AI analysis
+        ai_analysis = self.analyze_with_chatgpt(formatted_data)
+        
+        if not ai_analysis:
+            print("❌ AI analysis failed.")
+            return None
+        
+        # Step 4: Display results
+        self.display_results(property_data, ai_analysis)
         
         return {
-            "address": address,
-            "distress_score": score,
-            "risk_level": risk_level,
-            "confidence": confidence,
-            "risk_factors": result['risk_factors'],
-            "property_data": property_data,
-            "market_data": market_data,
-            "signals": asdict(signals),
-            "status": "success"
+            'property_data': property_data,
+            'ai_analysis': ai_analysis
         }
 
+    def display_results(self, property_data, ai_analysis):
+        """Display formatted analysis results"""
+        
+        print("\n" + "="*80)
+        print("🎯 AI DISTRESS ANALYSIS RESULTS")
+        print("="*80)
+        
+        print(f"📍 Property: {property_data['address']}")
+        print(f"📊 Data Sources: {', '.join(property_data['data_sources'])}")
+        
+        if 'avm' in property_data and property_data['avm'].get('current_value'):
+            print(f"💰 Current Value: ${property_data['avm']['current_value']:,}")
+        
+        print("\n🤖 AI EXPERT ANALYSIS:")
+        print("-" * 40)
+        
+        if 'distress_score' in ai_analysis:
+            print(f"📈 Distress Score: {ai_analysis['distress_score']}/100")
+            print(f"🎯 Confidence Level: {ai_analysis['confidence_level']}/100")
+            print(f"💸 Valuation Discount: {ai_analysis['valuation_discount']}")
+            print(f"📝 Explanation: {ai_analysis['explanation']}")
+        else:
+            print("Raw AI Response:")
+            print(ai_analysis.get('raw_response', 'No response'))
+
 def main():
-    """Test the AI distress analyzer on Florida properties"""
-    print("🤖 AI-POWERED DISTRESS SIGNALING SYSTEM")
-    print("=" * 90)
-    print("Advanced real estate distress analysis using AI and multiple data sources\n")
+    parser = argparse.ArgumentParser(description='AI-Powered Real Estate Distress Analysis')
+    parser.add_argument('address1', help='Street address (e.g., "123 MAIN STREET")')
+    parser.add_argument('address2', help='City, State, ZIP (e.g., "PALM BEACH GARDENS, FL 33418")')
+    parser.add_argument('--api-key', help='OpenAI API key (or set OPENAI_API_KEY env var)')
     
-    analyzer = AIDistressAnalyzer()
+    args = parser.parse_args()
     
-    # Test addresses with varying risk profiles
-    test_addresses = [
-        "920 POPLAR DRIVE, LAKE PARK, FL 33403",      # Should be LOW risk
-        "4704 COHUNE PALM DRIVE, GREENACRES, FL 33463",  # Should be LOW risk  
-        "4520 PGA BLVD, PALM BEACH GARDENS, FL 33418",   # Should be MEDIUM-HIGH (commercial)
-        "8401 LAKE WORTH ROAD, LAKE WORTH, FL 33467",    # Should be MEDIUM-HIGH (area risk)
-        "1520 10TH AVENUE N, LAKE WORTH, FL 33460",      # Should be MEDIUM-HIGH (area risk)
-    ]
+    analyzer = AIDistressAnalyzer(openai_api_key=args.api_key)
+    result = analyzer.analyze_property(args.address1, args.address2)
     
-    results = []
-    risk_summary = {"CRITICAL": 0, "HIGH": 0, "MEDIUM": 0, "LOW": 0, "MINIMAL": 0}
-    
-    for address in test_addresses:
-        result = analyzer.analyze_property_distress(address)
-        results.append(result)
+    if result:
+        # Save results to JSON file
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        filename = f"ai_analysis_{timestamp}.json"
         
-        if result.get("risk_level"):
-            risk_summary[result["risk_level"]] += 1
+        with open(filename, 'w') as f:
+            json.dump(result, f, indent=2, default=str)
         
-        time.sleep(1)  # Rate limiting
-    
-    # Summary report
-    print(f"\n📋 AI DISTRESS ANALYSIS SUMMARY")
-    print("=" * 90)
-    print(f"Total properties analyzed: {len(test_addresses)}")
-    for level, count in risk_summary.items():
-        if count > 0:
-            emoji = {"CRITICAL": "🔴🚨", "HIGH": "🔴", "MEDIUM": "🟡", "LOW": "🟡", "MINIMAL": "🟢"}[level]
-            print(f"{emoji} {level} Risk: {count}")
-    
-    # Detailed results by risk level
-    for risk_level in ["CRITICAL", "HIGH", "MEDIUM", "LOW", "MINIMAL"]:
-        properties = [r for r in results if r.get("risk_level") == risk_level]
-        if properties:
-            emoji = {"CRITICAL": "🔴🚨", "HIGH": "🔴", "MEDIUM": "🟡", "LOW": "🟡", "MINIMAL": "🟢"}[risk_level]
-            print(f"\n{emoji} {risk_level} RISK PROPERTIES:")
-            for prop in properties:
-                score = prop.get("distress_score", 0)
-                confidence = prop.get("confidence", 0)
-                factors = len(prop.get("risk_factors", []))
-                print(f"  Score {score}/100 (Confidence: {confidence}%, Factors: {factors}) - {prop['address']}")
+        print(f"\n💾 Results saved to: {filename}")
 
 if __name__ == "__main__":
     main() 
