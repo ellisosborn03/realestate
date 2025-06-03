@@ -82,7 +82,8 @@ def upload_file():
 def clean_address1(address: str) -> str:
     """
     Clean and normalize US residential address1 for ATTOM API queries.
-    Always strip trailing LOT, UNIT, or APT suffixes and their values.
+    Always preserve trailing LOT, UNIT, or APT suffixes and their values for ATTOM API queries.
+    Only strip them for fallback/retry.
     """
     if not address:
         return ""
@@ -111,8 +112,7 @@ def clean_address1(address: str) -> str:
     }
     for pattern, replacement in usps_suffix_map.items():
         address = re.sub(pattern, replacement, address)
-    # Always strip trailing LOT/UNIT/APT and value
-    address = re.sub(r'\b(UNIT|APT|LOT)\s*[A-Z0-9#\-]+$', '', address).strip().rstrip(',')
+    # DO NOT strip trailing LOT/UNIT/APT and value here (preserve for ATTOM)
     return address.strip()
 
 def is_valid_florida_address(address2):
@@ -144,6 +144,77 @@ def query_attom_avm(address1, address2):
         logging.error(f"query_attom_avm error: {e}")
         return {'status': {'code': 400, 'msg': 'Error'}, 'property': []}
 
+# Helper: generate address variants for brute-force ATTOM AVM
+
+def generate_address_variants(address):
+    """
+    Generate address variants: original, stripped unit/apt/lot, alternate suffixes.
+    """
+    variants = [address]
+    # Strip unit/apt/lot
+    stripped = strip_unit_or_lot_suffix(address)
+    if stripped != address:
+        variants.append(stripped)
+    # Try alternate suffixes (e.g., DR <-> DRIVE, ST <-> STREET, etc.)
+    usps_suffix_map = [
+        (r"\bDRIVE\b", "DR"), (r"\bDR\b", "DRIVE"),
+        (r"\bROAD\b", "RD"), (r"\bRD\b", "ROAD"),
+        (r"\bSTREET\b", "ST"), (r"\bST\b", "STREET"),
+        (r"\bCOURT\b", "CT"), (r"\bCT\b", "COURT"),
+        (r"\bLANE\b", "LN"), (r"\bLN\b", "LANE"),
+        (r"\bAVENUE\b", "AVE"), (r"\bAVE\b", "AVENUE"),
+        (r"\bBOULEVARD\b", "BLVD"), (r"\bBLVD\b", "BOULEVARD"),
+        (r"\bPLACE\b", "PL"), (r"\bPL\b", "PLACE"),
+        (r"\bPARKWAY\b", "PKWY"), (r"\bPKWY\b", "PARKWAY"),
+        (r"\bTERRACE\b", "TER"), (r"\bTER\b", "TERRACE"),
+        (r"\bCIRCLE\b", "CIR"), (r"\bCIR\b", "CIRCLE"),
+    ]
+    for pattern, replacement in usps_suffix_map:
+        alt = re.sub(pattern, replacement, address)
+        if alt != address and alt not in variants:
+            variants.append(alt)
+        if stripped:
+            alt2 = re.sub(pattern, replacement, stripped)
+            if alt2 != stripped and alt2 not in variants:
+                variants.append(alt2)
+    return variants
+
+# Add this helper for logging variants
+
+def log_variant_attempt(variant, address2):
+    print(f"  [TRY] {variant}, {address2}", flush=True)
+
+def log_attom_response(resp):
+    print(f"    [ATTOM STATUS] {getattr(resp, 'status_code', 'N/A')}", flush=True)
+    try:
+        print(f"    [ATTOM BODY] {resp.text[:200]}...", flush=True)
+    except Exception:
+        pass
+
+def try_attom_variants(address1_variants, address2):
+    """Try each address1 variant until a valuation is found, with detailed logging."""
+    for variant in address1_variants:
+        log_variant_attempt(variant, address2)
+        url = "https://api.gateway.attomdata.com/propertyapi/v1.0.0/attomavm/detail"
+        params = {'address1': variant, 'address2': address2}
+        headers = {'accept': 'application/json', 'apikey': 'ad91f2f30426f1ee54aec35791aaa044'}
+        try:
+            resp = requests.get(url, params=params, headers=headers, timeout=10)
+            log_attom_response(resp)
+            resp.raise_for_status()
+            response = resp.json()
+        except Exception as e:
+            print(f"    [ATTOM ERROR] {e}", flush=True)
+            continue
+        if response and response.get('status', {}).get('code') == 0 and response.get('status', {}).get('msg') == 'SuccessWithResult':
+            prop = response.get('property', [{}])[0]
+            one_line = prop.get('address', {}).get('oneLine', f"{variant}, {address2}")
+            value = prop.get('avm', {}).get('amount', {}).get('value', 'N/A')
+            logger.info(f"ATTOM success: {one_line} -> {value} (variant: {variant})")
+            return one_line, value
+    logger.info(f"ATTOM failed for all variants: {address1_variants} {address2}")
+    return f"{address1_variants[0]}, {address2}", 'N/A'
+
 @app.route('/cross-reference', methods=['POST'])
 def cross_reference():
     logging.info('Received cross-reference request')
@@ -168,16 +239,8 @@ def cross_reference():
                 results_dict[f"{address1}, {address2}"] = 'N/A'
                 continue
 
-            response = query_attom_avm(address1, address2)
-            logging.info(f"ATTOM response: {response}")
-            one_line = address1 + ', ' + address2
-            value = 'N/A'
-            if response and response.get('status', {}).get('code') == 0 and response.get('status', {}).get('msg') == 'SuccessWithResult':
-                prop = response.get('property', [{}])[0]
-                one_line = prop.get('address', {}).get('oneLine', one_line)
-                value = prop.get('avm', {}).get('amount', {}).get('value', 'N/A')
-            elif response and (response.get('status', {}).get('code') == 400 or response.get('status', {}).get('msg') == 'SuccessWithoutResult' or not response.get('property')):
-                value = 'N/A'
+            address1_variants = generate_address_variants(address1)
+            one_line, value = try_attom_variants(address1_variants, address2)
             results_dict[one_line] = value
 
         # Output as sorted list of dicts for frontend
@@ -208,24 +271,42 @@ def cross_reference_single():
         address2 = raw_address2.strip().upper().replace(' ,', ',').replace('  ', ' ')
         if not address1 or not address2 or not is_valid_florida_address(address2):
             return jsonify({'success': True, 'data': {'Valuation': 'N/A', 'Address': address1}})
-        # Query ATTOM
-        response = query_attom_avm(address1, address2)
-        logging.info(f"ATTOM response: {response}")
-        # Default values
-        one_line = address1 + ', ' + address2
-        value = 'N/A'
-        if response and response.get('status', {}).get('code') == 0 and response.get('status', {}).get('msg') == 'SuccessWithResult':
-            prop = response.get('property', [{}])[0]
-            one_line = prop.get('address', {}).get('oneLine', one_line)
-            value = prop.get('avm', {}).get('amount', {}).get('value', 'N/A')
-        # Only N/A if 400/SuccessWithoutResult or property is empty
-        elif response and (response.get('status', {}).get('code') == 400 or response.get('status', {}).get('msg') == 'SuccessWithoutResult' or not response.get('property')):
-            value = 'N/A'
+        address1_variants = generate_address_variants(address1)
+        one_line, value = try_attom_variants(address1_variants, address2)
         logging.info(f"Returning: {one_line} -> {value}")
         return jsonify({'success': True, 'data': {'Valuation': value, 'Address': one_line}})
     except Exception as e:
         logging.exception('cross-reference-single: Exception')
         return jsonify({'success': False, 'error': str(e)}), 500
+
+@app.route('/distress-single', methods=['POST'])
+def distress_single():
+    try:
+        row = request.json
+        app.logger.info(f"distress-single input: {row}")
+        # Validate input
+        if not isinstance(row, dict):
+            app.logger.error('distress-single: Invalid data format')
+            return jsonify({'success': False, 'error': 'Invalid data format'}), 400
+        # Extract relevant fields for distress scoring, defaulting to 0/False if missing
+        attom_data = {
+            'loanToValuePct': row.get('loanToValuePct', 0) or 0,
+            'daysOnMarket': row.get('daysOnMarket', 0) or 0,
+            'medianDaysOnMarket': row.get('medianDaysOnMarket', 0) or 0,
+            'originalListPrice': row.get('originalListPrice', 0) or 0,
+            'currentListPrice': row.get('currentListPrice', 0) or 0,
+            'preforeclosureActive': row.get('preforeclosureActive', False) or False,
+            'taxDelinquent': row.get('taxDelinquent', False) or False,
+            'absenteeOwner': row.get('absenteeOwner', False) or False,
+            'absorptionRate': row.get('absorptionRate', 0) or 0
+        }
+        from src.services.calculateDistressScore import calculateDistressScore
+        result = calculateDistressScore(attom_data)
+        return jsonify({'success': True, 'data': result})
+    except Exception as e:
+        import traceback
+        app.logger.error(f"Distress error: {e}\n{traceback.format_exc()}")
+        return jsonify({'error': str(e)}), 500
 
 if __name__ == '__main__':
     try:

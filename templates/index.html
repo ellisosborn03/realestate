@@ -338,8 +338,31 @@
             });
         });
         document.getElementById('distressBtn').addEventListener('click', async () => {
-            alert('Distress scoring coming soon!');
-            // You can implement a /distress endpoint and call it here, similar to valuationBtn
+            const dataToSend = getFilteredRows();
+            if (dataToSend.length === 0) {
+                alert('No data to score.');
+                return;
+            }
+            // Render the table with N/A for all distress scores
+            displayResults(dataToSend);
+
+            // For each row, fire off a request and update the table as results come in
+            dataToSend.forEach(async (row, idx) => {
+                try {
+                    const response = await fetch('/distress-single', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(row)
+                    });
+                    if (!response.ok) return;
+                    const result = await response.json();
+                    if (result.success && result.data) {
+                        updateDistressCell(idx, result.data.distress_score);
+                    }
+                } catch (e) {
+                    // Optionally handle error
+                }
+            });
         });
 
         function capitalizeWords(str) {
@@ -478,6 +501,26 @@
             const td = tr.children[valIdx];
             if (!td) return;
             // Update the cell content
+            td.querySelector('.cell-content').textContent = newVal !== undefined ? newVal : 'N/A';
+            td.title = newVal !== undefined ? newVal : 'N/A';
+        }
+
+        function updateDistressCell(rowIdx, newVal) {
+            const table = document.querySelector('#tableContainer table');
+            if (!table) return;
+            const tbody = table.querySelector('tbody');
+            if (!tbody) return;
+            const tr = tbody.children[rowIdx];
+            if (!tr) return;
+            // Find the Distress Level column index
+            const ths = table.querySelectorAll('thead th');
+            let distressIdx = -1;
+            ths.forEach((th, i) => {
+                if (th.textContent.trim() === 'Distress Level') distressIdx = i;
+            });
+            if (distressIdx === -1) return;
+            const td = tr.children[distressIdx];
+            if (!td) return;
             td.querySelector('.cell-content').textContent = newVal !== undefined ? newVal : 'N/A';
             td.title = newVal !== undefined ? newVal : 'N/A';
         }
