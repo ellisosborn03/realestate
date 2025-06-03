@@ -9,9 +9,13 @@ import numpy as np
 from werkzeug.serving import run_simple
 import re
 from urllib.parse import quote_plus
+import sqlite3
+import json
+from datetime import datetime
 
 app = Flask(__name__)
 app.config['UPLOAD_FOLDER'] = 'uploads'
+app.config['DATABASE'] = 'distress_analysis.db'
 
 # Configure logging
 logging.basicConfig(
@@ -22,6 +26,37 @@ logger = logging.getLogger(__name__)
 
 if not os.path.exists(app.config['UPLOAD_FOLDER']):
     os.makedirs(app.config['UPLOAD_FOLDER'])
+
+def init_database():
+    """Initialize the SQLite database for storing analysis results"""
+    conn = sqlite3.connect(app.config['DATABASE'])
+    cursor = conn.cursor()
+    
+    # Create properties table
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS properties (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            address TEXT NOT NULL,
+            distress_score INTEGER,
+            risk_level TEXT,
+            discount_potential TEXT,
+            property_value REAL,
+            confidence INTEGER,
+            risk_factors TEXT,
+            analysis_type TEXT,
+            source_file TEXT,
+            case_id TEXT,
+            party_name TEXT,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            distress_explanation TEXT
+        )
+    ''')
+    
+    conn.commit()
+    conn.close()
+
+# Initialize database on startup
+init_database()
 
 def cleanup():
     """Cleanup function to be called on shutdown"""
@@ -49,6 +84,200 @@ def clean_nan(obj):
 @app.route('/')
 def index():
     return render_template('index.html')
+
+@app.route('/distress-dashboard')
+def distress_dashboard():
+    """New page showing all analyzed properties with filtering"""
+    return render_template('distress_dashboard.html')
+
+@app.route('/api/properties')
+def get_properties():
+    """API endpoint to get all properties with optional filtering"""
+    source_file = request.args.get('source_file', None)
+    analysis_type = request.args.get('analysis_type', None)
+    
+    conn = sqlite3.connect(app.config['DATABASE'])
+    cursor = conn.cursor()
+    
+    # Build query with filters
+    query = '''
+        SELECT 
+            id, address, distress_score, risk_level, discount_potential, 
+            property_value, confidence, risk_factors, analysis_type, 
+            source_file, case_id, party_name, created_at, distress_explanation
+        FROM properties
+        WHERE 1=1
+    '''
+    params = []
+    
+    if source_file:
+        query += ' AND source_file = ?'
+        params.append(source_file)
+    
+    if analysis_type:
+        query += ' AND analysis_type = ?'
+        params.append(analysis_type)
+    
+    query += ' ORDER BY distress_score DESC, created_at DESC'
+    
+    cursor.execute(query, params)
+    rows = cursor.fetchall()
+    
+    properties = []
+    for row in rows:
+        risk_factors = json.loads(row[7]) if row[7] else []
+        properties.append({
+            'id': row[0],
+            'address': row[1],
+            'distress_score': row[2],
+            'risk_level': row[3],
+            'discount_potential': row[4],
+            'property_value': row[5],
+            'confidence': row[6],
+            'risk_factors': risk_factors,
+            'analysis_type': row[8],
+            'source_file': row[9],
+            'case_id': row[10],
+            'party_name': row[11],
+            'created_at': row[12],
+            'distress_explanation': row[13]
+        })
+    
+    conn.close()
+    return jsonify({'properties': properties})
+
+@app.route('/api/source-files')
+def get_source_files():
+    """Get list of unique source files for filtering"""
+    conn = sqlite3.connect(app.config['DATABASE'])
+    cursor = conn.cursor()
+    
+    cursor.execute('SELECT DISTINCT source_file FROM properties WHERE source_file IS NOT NULL ORDER BY source_file')
+    files = [row[0] for row in cursor.fetchall()]
+    
+    conn.close()
+    return jsonify({'files': files})
+
+@app.route('/api/save-analysis', methods=['POST'])
+def save_analysis():
+    """Save analysis results to database"""
+    try:
+        data = request.json
+        
+        conn = sqlite3.connect(app.config['DATABASE'])
+        cursor = conn.cursor()
+        
+        # Generate distress explanation with property data
+        risk_factors = data.get('risk_factors', [])
+        distress_score = data.get('distress_score', 0)
+        discount_potential = data.get('discount_potential', '0-0%')
+        
+        # Extract property data from the request
+        property_data = {
+            'current_value': data.get('property_value', 0),
+            'days_on_market': data.get('days_on_market', 0),
+            'tax_liens': data.get('tax_liens', 0),
+            'year_built': data.get('year_built', 0),
+            'court_deadline': data.get('court_deadline', 0),
+            'case_duration_months': data.get('case_duration_months', 0)
+        }
+        
+        explanation = generate_distress_explanation(distress_score, discount_potential, risk_factors, property_data)
+        
+        cursor.execute('''
+            INSERT INTO properties 
+            (address, distress_score, risk_level, discount_potential, property_value,
+             confidence, risk_factors, analysis_type, source_file, case_id, 
+             party_name, distress_explanation)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ''', (
+            data.get('address'),
+            data.get('distress_score'),
+            data.get('risk_level'),
+            data.get('discount_potential'),
+            data.get('property_value'),
+            data.get('confidence'),
+            json.dumps(data.get('risk_factors', [])),
+            data.get('analysis_type', 'divorce'),
+            data.get('source_file'),
+            data.get('case_id'),
+            data.get('party_name'),
+            explanation
+        ))
+        
+        conn.commit()
+        property_id = cursor.lastrowid
+        conn.close()
+        
+        return jsonify({'success': True, 'id': property_id})
+        
+    except Exception as e:
+        logger.error(f"Error saving analysis: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+def generate_distress_explanation(distress_score, discount_potential, risk_factors, property_data=None):
+    """Generate concise explanation based on real property data and distress factors"""
+    
+    # Extract real metrics from property data if available
+    factors = []
+    
+    # Add property-specific metrics from ATTOM API
+    if property_data:
+        value = property_data.get('current_value', 0)
+        if value > 0:
+            if value > 500000:
+                factors.append(f"${value:,} high-value property")
+            else:
+                factors.append(f"${value:,} property")
+        
+        # Court deadline creates urgency
+        court_deadline = property_data.get('court_deadline', 0)
+        if court_deadline > 0 and court_deadline < 120:
+            factors.append(f"{court_deadline}-day court deadline")
+        
+        # Case duration shows extended stress
+        case_duration = property_data.get('case_duration_months', 0)
+        if case_duration > 12:
+            factors.append(f"{case_duration}-month case duration")
+        
+        # Days on market from ATTOM data
+        days_on_market = property_data.get('days_on_market', 0)
+        if days_on_market > 90:
+            factors.append(f"{days_on_market} days on market")
+        
+        # Tax liens from ATTOM data
+        tax_liens = property_data.get('tax_liens', 0)
+        if tax_liens > 0:
+            factors.append(f"${tax_liens:,} tax liens")
+        
+        # Property age risk
+        year_built = property_data.get('year_built', 0)
+        if year_built > 0 and (2024 - year_built) > 30:
+            factors.append(f"{2024 - year_built}yr old property")
+    
+    # Add real case-specific factors from risk_factors (limit to most important)
+    divorce_factors = []
+    for factor in risk_factors:
+        if "court-ordered sale" in factor.lower():
+            divorce_factors.append("court-ordered sale")
+        elif "dual mortgage" in factor.lower():
+            divorce_factors.append("dual mortgage obligations")
+        elif "legal fee" in factor.lower():
+            divorce_factors.append("high legal costs")
+        elif "child support" in factor.lower():
+            divorce_factors.append("child support requirements")
+        elif "contested" in factor.lower():
+            divorce_factors.append("contested divorce")
+    
+    # Combine property and divorce factors (max 4 total)
+    all_factors = factors + divorce_factors[:2]  # Prioritize property data
+    
+    # Build concise explanation with real factors only
+    if all_factors:
+        factor_list = ", ".join(all_factors[:4])  # Max 4 factors
+        return f"{discount_potential} discount from {factor_list}."
+    else:
+        return f"{discount_potential} discount potential from divorce proceedings."
 
 @app.route('/upload', methods=['POST'])
 def upload_file():

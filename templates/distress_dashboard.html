@@ -1,0 +1,448 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Distress Analysis Dashboard</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+    <style>
+        body {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+        }
+        
+        .dashboard-card {
+            background: white;
+            border-radius: 15px;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.1);
+            margin: 20px 0;
+        }
+        
+        .risk-badge {
+            font-size: 0.8em;
+            font-weight: bold;
+            padding: 4px 8px;
+            border-radius: 10px;
+        }
+        
+        .risk-critical { background: #dc3545; color: white; }
+        .risk-high { background: #fd7e14; color: white; }
+        .risk-medium-high { background: #ffc107; color: black; }
+        .risk-medium { background: #20c997; color: white; }
+        .risk-low { background: #198754; color: white; }
+        
+        .distress-score {
+            font-size: 1.2em;
+            font-weight: bold;
+            color: #495057;
+        }
+        
+        .property-value {
+            color: #28a745;
+            font-weight: bold;
+        }
+        
+        .filter-section {
+            background: rgba(255,255,255,0.1);
+            border-radius: 10px;
+            padding: 15px;
+            margin-bottom: 20px;
+        }
+        
+        .stats-card {
+            background: rgba(255,255,255,0.95);
+            border-radius: 10px;
+            padding: 15px;
+            margin-bottom: 15px;
+            text-align: center;
+        }
+        
+        .explanation-text {
+            font-size: 0.9em;
+            color: #6c757d;
+            font-style: italic;
+        }
+        
+        .table thead th {
+            background: #f8f9fa;
+            border-top: none;
+            font-weight: 600;
+        }
+        
+        .navbar {
+            background: rgba(255,255,255,0.1) !important;
+            backdrop-filter: blur(10px);
+        }
+        
+        .navbar-brand, .nav-link {
+            color: white !important;
+        }
+        
+        .loading-spinner {
+            display: none;
+        }
+    </style>
+</head>
+<body>
+    <nav class="navbar navbar-expand-lg navbar-dark">
+        <div class="container">
+            <a class="navbar-brand" href="/">
+                <i class="fas fa-home-alt me-2"></i>Real Estate Distress Analytics
+            </a>
+            <div class="navbar-nav ms-auto">
+                <a class="nav-link" href="/">
+                    <i class="fas fa-upload me-1"></i>Upload Data
+                </a>
+                <a class="nav-link active" href="/distress-dashboard">
+                    <i class="fas fa-chart-bar me-1"></i>Dashboard
+                </a>
+            </div>
+        </div>
+    </nav>
+
+    <div class="container mt-4">
+        <!-- Header -->
+        <div class="row">
+            <div class="col-12">
+                <div class="dashboard-card p-4">
+                    <h1 class="h2 mb-3">
+                        <i class="fas fa-chart-line text-primary me-2"></i>
+                        Distress Analysis Dashboard
+                    </h1>
+                    <p class="text-muted">View all analyzed properties ranked by distress score with detailed discount calculations.</p>
+                </div>
+            </div>
+        </div>
+
+        <!-- Stats Row -->
+        <div class="row" id="statsRow">
+            <div class="col-md-3">
+                <div class="stats-card">
+                    <h3 class="h4 mb-1" id="totalProperties">0</h3>
+                    <small class="text-muted">Total Properties</small>
+                </div>
+            </div>
+            <div class="col-md-3">
+                <div class="stats-card">
+                    <h3 class="h4 mb-1" id="avgScore">0</h3>
+                    <small class="text-muted">Avg Distress Score</small>
+                </div>
+            </div>
+            <div class="col-md-3">
+                <div class="stats-card">
+                    <h3 class="h4 mb-1" id="highRiskCount">0</h3>
+                    <small class="text-muted">High Risk Properties</small>
+                </div>
+            </div>
+            <div class="col-md-3">
+                <div class="stats-card">
+                    <h3 class="h4 mb-1" id="totalValue">$0</h3>
+                    <small class="text-muted">Total Portfolio Value</small>
+                </div>
+            </div>
+        </div>
+
+        <!-- Filters -->
+        <div class="row">
+            <div class="col-12">
+                <div class="filter-section">
+                    <div class="row align-items-start">
+                        <div class="col-md-4">
+                            <label class="form-label text-white">Filter by Source File:</label>
+                            <div class="source-files-container" style="max-height: 200px; overflow-y: auto; background: rgba(255,255,255,0.1); border-radius: 8px; padding: 10px;">
+                                <div class="form-check">
+                                    <input class="form-check-input" type="checkbox" id="selectAllFiles" checked>
+                                    <label class="form-check-label text-white" for="selectAllFiles">
+                                        <strong>All Files</strong>
+                                    </label>
+                                </div>
+                                <hr style="border-color: rgba(255,255,255,0.3); margin: 8px 0;">
+                                <div id="sourceFileCheckboxes">
+                                    <!-- Checkboxes will be populated here -->
+                                </div>
+                            </div>
+                        </div>
+                        <div class="col-md-4">
+                            <label class="form-label text-white">Analysis Type:</label>
+                            <select class="form-select" id="analysisTypeFilter">
+                                <option value="">All Types</option>
+                                <option value="divorce">Divorce Cases</option>
+                                <option value="general">General Analysis</option>
+                            </select>
+                        </div>
+                        <div class="col-md-4">
+                            <label class="form-label text-white">Risk Level:</label>
+                            <select class="form-select" id="riskLevelFilter">
+                                <option value="">All Risk Levels</option>
+                                <option value="CRITICAL">Critical</option>
+                                <option value="HIGH">High</option>
+                                <option value="MEDIUM-HIGH">Medium-High</option>
+                                <option value="MEDIUM">Medium</option>
+                                <option value="LOW">Low</option>
+                            </select>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Properties Table -->
+        <div class="row">
+            <div class="col-12">
+                <div class="dashboard-card p-0">
+                    <div class="p-3 border-bottom">
+                        <h3 class="h5 mb-0">
+                            <i class="fas fa-table me-2"></i>
+                            Property Analysis Results
+                        </h3>
+                        <div class="loading-spinner mt-2">
+                            <i class="fas fa-spinner fa-spin me-2"></i>Loading properties...
+                        </div>
+                    </div>
+                    
+                    <div class="table-responsive">
+                        <table class="table table-hover mb-0" id="propertiesTable">
+                            <thead>
+                                <tr>
+                                    <th>Address</th>
+                                    <th>Distress Score</th>
+                                    <th>Risk Level</th>
+                                    <th>Property Value</th>
+                                    <th>Discount Potential</th>
+                                    <th>Explanation</th>
+                                    <th>Source</th>
+                                </tr>
+                            </thead>
+                            <tbody id="propertiesTableBody">
+                                <tr>
+                                    <td colspan="7" class="text-center text-muted p-4">
+                                        No properties found. Upload and analyze some data first.
+                                    </td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/js/bootstrap.bundle.min.js"></script>
+    <script>
+        let allProperties = [];
+        let filteredProperties = [];
+
+        // Load data on page load
+        document.addEventListener('DOMContentLoaded', function() {
+            loadSourceFiles();
+            loadProperties();
+        });
+
+        // Filter event listeners
+        document.getElementById('selectAllFiles').addEventListener('change', handleSelectAllFiles);
+        document.getElementById('analysisTypeFilter').addEventListener('change', applyFilters);
+        document.getElementById('riskLevelFilter').addEventListener('change', applyFilters);
+
+        async function loadSourceFiles() {
+            try {
+                const response = await fetch('/api/source-files');
+                const data = await response.json();
+                
+                const container = document.getElementById('sourceFileCheckboxes');
+                container.innerHTML = '';
+                
+                data.files.forEach(file => {
+                    const checkboxDiv = document.createElement('div');
+                    checkboxDiv.className = 'form-check';
+                    checkboxDiv.innerHTML = `
+                        <input class="form-check-input source-file-checkbox" type="checkbox" id="file_${file.replace(/[^a-zA-Z0-9]/g, '_')}" value="${file}" checked>
+                        <label class="form-check-label text-white" for="file_${file.replace(/[^a-zA-Z0-9]/g, '_')}">
+                            ${file || 'Unknown File'}
+                        </label>
+                    `;
+                    container.appendChild(checkboxDiv);
+                });
+                
+                // Add event listeners to all checkboxes
+                document.querySelectorAll('.source-file-checkbox').forEach(checkbox => {
+                    checkbox.addEventListener('change', handleSourceFileChange);
+                });
+                
+            } catch (error) {
+                console.error('Error loading source files:', error);
+            }
+        }
+
+        function handleSelectAllFiles() {
+            const selectAll = document.getElementById('selectAllFiles');
+            const checkboxes = document.querySelectorAll('.source-file-checkbox');
+            
+            checkboxes.forEach(checkbox => {
+                checkbox.checked = selectAll.checked;
+            });
+            
+            applyFilters();
+        }
+
+        function handleSourceFileChange() {
+            const selectAll = document.getElementById('selectAllFiles');
+            const checkboxes = document.querySelectorAll('.source-file-checkbox');
+            const checkedBoxes = document.querySelectorAll('.source-file-checkbox:checked');
+            
+            // Update "Select All" state
+            if (checkedBoxes.length === checkboxes.length) {
+                selectAll.checked = true;
+                selectAll.indeterminate = false;
+            } else if (checkedBoxes.length === 0) {
+                selectAll.checked = false;
+                selectAll.indeterminate = false;
+            } else {
+                selectAll.checked = false;
+                selectAll.indeterminate = true;
+            }
+            
+            applyFilters();
+        }
+
+        function applyFilters() {
+            const selectedFiles = Array.from(document.querySelectorAll('.source-file-checkbox:checked')).map(cb => cb.value);
+            const analysisType = document.getElementById('analysisTypeFilter').value;
+            const riskLevel = document.getElementById('riskLevelFilter').value;
+
+            filteredProperties = allProperties.filter(property => {
+                // If no files are selected, show nothing
+                if (selectedFiles.length === 0) return false;
+                
+                // Check if property's source file is in selected files
+                if (!selectedFiles.includes(property.source_file)) return false;
+                
+                if (analysisType && property.analysis_type !== analysisType) return false;
+                if (riskLevel && property.risk_level !== riskLevel) return false;
+                return true;
+            });
+
+            updateStats();
+            renderTable();
+        }
+
+        async function loadProperties() {
+            document.querySelector('.loading-spinner').style.display = 'block';
+            
+            try {
+                const response = await fetch('/api/properties');
+                const data = await response.json();
+                
+                allProperties = data.properties;
+                filteredProperties = [...allProperties];
+                
+                updateStats();
+                renderTable();
+                
+            } catch (error) {
+                console.error('Error loading properties:', error);
+                document.getElementById('propertiesTableBody').innerHTML = `
+                    <tr>
+                        <td colspan="7" class="text-center text-danger p-4">
+                            <i class="fas fa-exclamation-triangle me-2"></i>
+                            Error loading properties: ${error.message}
+                        </td>
+                    </tr>
+                `;
+            } finally {
+                document.querySelector('.loading-spinner').style.display = 'none';
+            }
+        }
+
+        function updateStats() {
+            const total = filteredProperties.length;
+            const avgScore = total > 0 ? 
+                Math.round(filteredProperties.reduce((sum, p) => sum + (p.distress_score || 0), 0) / total) : 0;
+            const highRisk = filteredProperties.filter(p => 
+                p.risk_level === 'CRITICAL' || p.risk_level === 'HIGH').length;
+            const totalValue = filteredProperties.reduce((sum, p) => sum + (p.property_value || 0), 0);
+
+            document.getElementById('totalProperties').textContent = total;
+            document.getElementById('avgScore').textContent = avgScore;
+            document.getElementById('highRiskCount').textContent = highRisk;
+            document.getElementById('totalValue').textContent = 
+                totalValue > 0 ? `$${(totalValue / 1000000).toFixed(1)}M` : '$0';
+        }
+
+        function renderTable() {
+            const tbody = document.getElementById('propertiesTableBody');
+            
+            if (filteredProperties.length === 0) {
+                tbody.innerHTML = `
+                    <tr>
+                        <td colspan="7" class="text-center text-muted p-4">
+                            No properties match the current filters.
+                        </td>
+                    </tr>
+                `;
+                return;
+            }
+
+            tbody.innerHTML = filteredProperties.map(property => {
+                const riskClass = `risk-${property.risk_level?.toLowerCase().replace('-', '-')}`;
+                const valueDisplay = property.property_value > 0 ? 
+                    `$${property.property_value.toLocaleString()}` : 'N/A';
+                
+                return `
+                    <tr>
+                        <td>
+                            <div>
+                                <strong>${property.address}</strong>
+                                ${property.case_id ? `<br><small class="text-muted">Case: ${property.case_id}</small>` : ''}
+                                ${property.party_name ? `<br><small class="text-muted">Party: ${property.party_name}</small>` : ''}
+                            </div>
+                        </td>
+                        <td>
+                            <span class="distress-score">${property.distress_score}/100</span>
+                            <br><small class="text-muted">${property.confidence}% confidence</small>
+                        </td>
+                        <td>
+                            <span class="risk-badge ${riskClass}">
+                                ${property.risk_level}
+                            </span>
+                        </td>
+                        <td class="property-value">${valueDisplay}</td>
+                        <td>
+                            <strong>${property.discount_potential}</strong>
+                            ${property.property_value > 0 ? 
+                                `<br><small class="text-success">$${calculateDiscountValue(property)}</small>` : ''
+                            }
+                        </td>
+                        <td>
+                            <div class="explanation-text">
+                                ${property.distress_explanation || 'No explanation available'}
+                            </div>
+                        </td>
+                        <td>
+                            <small class="text-muted">
+                                ${property.source_file || 'Unknown'}
+                                <br>${property.analysis_type || 'general'}
+                                <br>${new Date(property.created_at).toLocaleDateString()}
+                            </small>
+                        </td>
+                    </tr>
+                `;
+            }).join('');
+        }
+
+        function calculateDiscountValue(property) {
+            if (!property.property_value || !property.discount_potential) return '0';
+            
+            const match = property.discount_potential.match(/(\d+)-(\d+)%/);
+            if (!match) return '0';
+            
+            const minDiscount = parseInt(match[1]);
+            const maxDiscount = parseInt(match[2]);
+            const avgDiscount = (minDiscount + maxDiscount) / 2;
+            
+            const discountValue = property.property_value * (avgDiscount / 100);
+            return discountValue.toLocaleString();
+        }
+    </script>
+</body>
+</html> 
