@@ -172,15 +172,144 @@ def save_analysis():
         distress_score = data.get('distress_score', 0)
         discount_potential = data.get('discount_potential', '0-0%')
         
-        # Extract property data from the request
-        property_data = {
-            'current_value': data.get('property_value', 0),
-            'days_on_market': data.get('days_on_market', 0),
-            'tax_liens': data.get('tax_liens', 0),
-            'year_built': data.get('year_built', 0),
-            'court_deadline': data.get('court_deadline', 0),
-            'case_duration_months': data.get('case_duration_months', 0)
-        }
+        # Extract REAL property data from the analysis results
+        property_data = {}
+        
+        # Get actual property value (from ATTOM AVM)
+        property_value = data.get('property_value', 0)
+        if property_value > 0:
+            property_data['current_value'] = property_value
+            
+        # Extract real property characteristics from the analysis
+        if 'year_built' in data and data.get('year_built', 0) > 0:
+            property_data['year_built'] = data.get('year_built')
+            
+        # Tax data from actual analysis
+        if 'tax_liens' in data and data.get('tax_liens', 0) > 0:
+            property_data['tax_liens'] = data.get('tax_liens')
+            
+        # Additional real data fields from divorce analysis
+        if 'assessed_value' in data and data.get('assessed_value', 0) > 0:
+            property_data['assessed_value'] = data.get('assessed_value')
+            
+        if 'tax_amount' in data and data.get('tax_amount', 0) > 0:
+            property_data['tax_amount'] = data.get('tax_amount')
+            
+        if 'tax_year' in data:
+            property_data['tax_year'] = data.get('tax_year')
+            
+        # Property characteristics 
+        if 'property_type' in data and data.get('property_type'):
+            property_data['property_type'] = data.get('property_type')
+            
+        if 'building_size' in data and data.get('building_size', 0) > 0:
+            property_data['building_size'] = data.get('building_size')
+            
+        if 'lot_size' in data and data.get('lot_size', 0) > 0:
+            property_data['lot_size'] = data.get('lot_size')
+            
+        if 'bedrooms' in data and data.get('bedrooms', 0) > 0:
+            property_data['bedrooms'] = data.get('bedrooms')
+            
+        if 'bathrooms' in data and data.get('bathrooms', 0) > 0:
+            property_data['bathrooms'] = data.get('bathrooms')
+            
+        # Ownership and occupancy status
+        if 'owner_occupied' in data:
+            property_data['owner_occupied'] = data.get('owner_occupied')
+            
+        if 'owner_name' in data and data.get('owner_name'):
+            property_data['owner_name'] = data.get('owner_name')
+            
+        # Sales history and market data
+        if 'last_sale_price' in data and data.get('last_sale_price', 0) > 0:
+            property_data['last_sale_price'] = data.get('last_sale_price')
+            
+        if 'last_sale_date' in data and data.get('last_sale_date'):
+            property_data['last_sale_date'] = data.get('last_sale_date')
+            
+        if 'sales_history_count' in data and data.get('sales_history_count', 0) > 0:
+            property_data['sales_history_count'] = data.get('sales_history_count')
+            
+        if 'price_appreciation' in data:
+            property_data['price_appreciation'] = data.get('price_appreciation')
+            
+        # Valuation confidence and range data
+        if 'confidence_score' in data and data.get('confidence_score', 0) > 0:
+            property_data['confidence_score'] = data.get('confidence_score')
+            
+        if 'value_high' in data and data.get('value_high', 0) > 0:
+            property_data['value_high'] = data.get('value_high')
+            
+        if 'value_low' in data and data.get('value_low', 0) > 0:
+            property_data['value_low'] = data.get('value_low')
+            
+        # Days on market from analysis
+        if 'days_on_market' in data and data.get('days_on_market', 0) > 0:
+            property_data['days_on_market'] = data.get('days_on_market')
+            
+        # Divorce-specific factors (use realistic defaults if not provided)
+        case_duration_months = 18  # Default Florida divorce duration
+        court_deadline = 90  # Default court deadline
+        
+        # Extract actual case data if available from divorce analysis
+        if 'divorce_signals' in data:
+            divorce_signals = data.get('divorce_signals')
+            case_duration_months = divorce_signals.get('case_duration_months', 18)
+            court_deadline = divorce_signals.get('court_ordered_sale_deadline', 90)
+            
+            # Extract more divorce-specific factors
+            if divorce_signals.get('children_involved'):
+                property_data['children_involved'] = True
+            if divorce_signals.get('contested_case'):
+                property_data['contested_case'] = True
+            if divorce_signals.get('forced_sale_timeline'):
+                property_data['forced_sale'] = True
+                
+        # Add divorce-specific timeline factors
+        property_data['case_duration_months'] = case_duration_months
+        property_data['court_deadline'] = court_deadline
+        
+        # Calculate tax burden if we have both assessed value and tax amount
+        assessed_value = property_data.get('assessed_value', 0)
+        tax_amount = property_data.get('tax_amount', 0)
+        if assessed_value > 0 and tax_amount > 0:
+            tax_rate = (tax_amount / assessed_value) * 100
+            property_data['tax_rate'] = tax_rate
+            if tax_rate > 3.0:  # High tax burden
+                property_data['high_tax_burden'] = True
+                
+        # Market timing factors
+        if 'urgency' in data and data.get('urgency') == 'HIGH':
+            property_data['urgent_sale'] = True
+            
+        # Property type specific risks
+        property_type = property_data.get('property_type', '').lower()
+        if 'condo' in property_type:
+            property_data['condo_risk'] = True
+        elif 'commercial' in property_type:
+            property_data['commercial_property'] = True
+        elif 'mobile' in property_type or 'manufactured' in property_type:
+            property_data['mobile_home_risk'] = True
+                
+        # Market conditions from ZIP analysis
+        address = data.get('address', '')
+        zip_match = re.search(r'\b(\d{5})\b', address)
+        if zip_match:
+            zip_code = zip_match.group(1)
+            # Add market-specific factors based on ZIP
+            high_stress_zips = ['33467', '33460', '33418']  # Lake Worth, PB Gardens
+            if zip_code in high_stress_zips:
+                property_data['difficult_market'] = True
+                
+        # Price depreciation analysis
+        current_value = property_data.get('current_value', 0)
+        last_sale_price = property_data.get('last_sale_price', 0)
+        if current_value > 0 and last_sale_price > 0:
+            value_change = ((current_value - last_sale_price) / last_sale_price) * 100
+            property_data['value_change'] = value_change
+            if value_change < -5:  # Value declined more than 5%
+                property_data['declining_value'] = True
         
         explanation = generate_distress_explanation(distress_score, discount_potential, risk_factors, property_data)
         
@@ -227,57 +356,207 @@ def generate_distress_explanation(distress_score, discount_potential, risk_facto
         if value > 0:
             if value > 500000:
                 factors.append(f"${value:,} high-value property")
+            elif value > 300000:
+                factors.append(f"${value:,} mid-market property")
             else:
-                factors.append(f"${value:,} property")
+                factors.append(f"${value:,} affordable property")
         
-        # Court deadline creates urgency
+        # Property size and characteristics
+        bedrooms = property_data.get('bedrooms', 0)
+        bathrooms = property_data.get('bathrooms', 0)
+        building_size = property_data.get('building_size', 0)
+        
+        if bedrooms > 0 or bathrooms > 0:
+            if bedrooms >= 4 and bathrooms >= 3:
+                factors.append(f"{bedrooms}BR/{bathrooms}BA family home")
+            elif bedrooms >= 2:
+                factors.append(f"{bedrooms}BR/{bathrooms}BA property")
+        elif building_size > 0:
+            if building_size > 3000:
+                factors.append(f"{building_size:,} sqft large home")
+            elif building_size > 2000:
+                factors.append(f"{building_size:,} sqft home")
+        
+        # Property condition and age factors
+        year_built = property_data.get('year_built', 0)
+        if year_built > 0:
+            property_age = 2024 - year_built
+            if property_age > 50:
+                factors.append(f"{property_age}-year vintage property")
+            elif property_age > 30:
+                factors.append(f"{property_age}-year established property")
+            elif property_age < 10:
+                factors.append(f"{property_age}-year newer construction")
+        
+        # Value change analysis
+        value_change = property_data.get('value_change', 0)
+        price_appreciation = property_data.get('price_appreciation', 0)
+        
+        if property_data.get('declining_value'):
+            factors.append(f"{abs(value_change):.1f}% value decline")
+        elif value_change < -2:
+            factors.append(f"{abs(value_change):.1f}% depreciation")
+        elif price_appreciation < -10:
+            factors.append(f"{abs(price_appreciation):.1f}% price drop")
+            
+        # Sales history patterns
+        sales_count = property_data.get('sales_history_count', 0)
+        if sales_count > 3:
+            factors.append(f"{sales_count} recent sales")
+        elif sales_count > 1:
+            last_sale_date = property_data.get('last_sale_date', '')
+            if '2023' in last_sale_date or '2024' in last_sale_date:
+                factors.append("recent sale activity")
+        
+        # Tax and financial burden factors
+        tax_rate = property_data.get('tax_rate', 0)
+        tax_amount = property_data.get('tax_amount', 0)
+        tax_liens = property_data.get('tax_liens', 0)
+        
+        if property_data.get('high_tax_burden') or tax_rate > 3.0:
+            factors.append(f"{tax_rate:.1f}% tax rate")
+        elif tax_amount > 10000:
+            factors.append(f"${tax_amount:,} annual taxes")
+        elif tax_liens > 10000:
+            factors.append(f"${tax_liens:,} tax burden")
+        elif tax_liens > 5000:
+            factors.append(f"${tax_liens:,} tax obligations")
+        elif tax_liens > 0:
+            factors.append(f"${tax_liens:,} tax liens")
+            
+        # Divorce-specific timing pressure
         court_deadline = property_data.get('court_deadline', 0)
-        if court_deadline > 0 and court_deadline < 120:
+        if court_deadline > 0 and court_deadline < 60:
+            factors.append(f"{court_deadline}-day urgent deadline")
+        elif court_deadline > 0 and court_deadline < 120:
             factors.append(f"{court_deadline}-day court deadline")
         
-        # Case duration shows extended stress
         case_duration = property_data.get('case_duration_months', 0)
-        if case_duration > 12:
+        if case_duration > 24:
+            factors.append(f"{case_duration}-month prolonged case")
+        elif case_duration > 12:
             factors.append(f"{case_duration}-month case duration")
+            
+        # Divorce complexity factors
+        if property_data.get('children_involved'):
+            factors.append("children involved")
+        if property_data.get('contested_case'):
+            factors.append("contested proceedings")
+        if property_data.get('forced_sale'):
+            factors.append("court-ordered sale")
         
-        # Days on market from ATTOM data
+        # Property type risks
+        if property_data.get('condo_risk'):
+            factors.append("condo association risks")
+        elif property_data.get('commercial_property'):
+            factors.append("commercial property complexity")
+        elif property_data.get('mobile_home_risk'):
+            factors.append("mobile home factors")
+            
+        # Market conditions
+        if property_data.get('difficult_market'):
+            factors.append("challenging market conditions")
+        elif property_data.get('urgent_sale'):
+            factors.append("urgent sale timeline")
+            
+        # Days on market
         days_on_market = property_data.get('days_on_market', 0)
-        if days_on_market > 90:
+        if days_on_market > 120:
+            factors.append(f"{days_on_market} days unsold")
+        elif days_on_market > 60:
             factors.append(f"{days_on_market} days on market")
         
-        # Tax liens from ATTOM data
-        tax_liens = property_data.get('tax_liens', 0)
-        if tax_liens > 0:
-            factors.append(f"${tax_liens:,} tax liens")
+        # Valuation uncertainty
+        confidence_score = property_data.get('confidence_score', 0)
+        value_high = property_data.get('value_high', 0)
+        value_low = property_data.get('value_low', 0)
         
-        # Property age risk
-        year_built = property_data.get('year_built', 0)
-        if year_built > 0 and (2024 - year_built) > 30:
-            factors.append(f"{2024 - year_built}yr old property")
+        if confidence_score > 0 and confidence_score < 70:
+            factors.append("valuation uncertainty")
+        elif value_high > 0 and value_low > 0 and value:
+            value_range = ((value_high - value_low) / value) * 100
+            if value_range > 20:
+                factors.append("wide value range")
+        
+        # Owner occupancy status
+        if property_data.get('owner_occupied') == False:
+            factors.append("absentee owner")
+        elif property_data.get('owner_name'):
+            factors.append("owner-occupied property")
     
-    # Add real case-specific factors from risk_factors (limit to most important)
-    divorce_factors = []
-    for factor in risk_factors:
-        if "court-ordered sale" in factor.lower():
-            divorce_factors.append("court-ordered sale")
-        elif "dual mortgage" in factor.lower():
-            divorce_factors.append("dual mortgage obligations")
-        elif "legal fee" in factor.lower():
-            divorce_factors.append("high legal costs")
-        elif "child support" in factor.lower():
-            divorce_factors.append("child support requirements")
-        elif "contested" in factor.lower():
-            divorce_factors.append("contested divorce")
+    # Process risk factors more intelligently
+    key_factors = []
+    processed_factors = set()  # Avoid duplicates
     
-    # Combine property and divorce factors (max 4 total)
-    all_factors = factors + divorce_factors[:2]  # Prioritize property data
+    for factor in risk_factors[:4]:  # Top 4 factors
+        factor_lower = factor.lower()
+        
+        # Skip if we already processed a similar factor
+        if any(processed in factor_lower for processed in processed_factors):
+            continue
+            
+        if "court-ordered" in factor_lower:
+            key_factors.append("court-ordered sale")
+            processed_factors.add("court")
+        elif "dual mortgage" in factor_lower:
+            key_factors.append("dual mortgage obligations")
+            processed_factors.add("mortgage")
+        elif "contested" in factor_lower:
+            key_factors.append("contested divorce")
+            processed_factors.add("contested")
+        elif "child support" in factor_lower:
+            key_factors.append("child support obligations")
+            processed_factors.add("child")
+        elif "extended" in factor_lower and "case" in factor_lower:
+            key_factors.append("extended legal proceedings")
+            processed_factors.add("extended")
+        elif "legal fee" in factor_lower or "high legal" in factor_lower:
+            key_factors.append("substantial legal fees")
+            processed_factors.add("legal")
+        elif "declining" in factor_lower and "value" in factor_lower:
+            key_factors.append("declining property value")
+            processed_factors.add("declining")
+        elif "tax" in factor_lower and ("delinquent" in factor_lower or "burden" in factor_lower):
+            key_factors.append("tax payment issues")
+            processed_factors.add("tax")
+        elif "buyer" in factor_lower and "market" in factor_lower:
+            key_factors.append("buyer's market")
+            processed_factors.add("market")
+        elif "underwater" in factor_lower:
+            key_factors.append("underwater mortgage")
+            processed_factors.add("underwater")
+        elif "older property" in factor_lower or "aging" in factor_lower:
+            key_factors.append("aging property concerns")
+            processed_factors.add("aging")
+        elif "high-value" in factor_lower:
+            key_factors.append("high-value complexity")
+            processed_factors.add("value")
+        elif "urgent" in factor_lower or "deadline" in factor_lower:
+            key_factors.append("urgent timeline")
+            processed_factors.add("urgent")
+        elif "turnover" in factor_lower:
+            key_factors.append("property instability")
+            processed_factors.add("turnover")
+        elif "seasonal" in factor_lower:
+            key_factors.append("seasonal market challenges")
+            processed_factors.add("seasonal")
     
-    # Build concise explanation with real factors only
-    if all_factors:
-        factor_list = ", ".join(all_factors[:4])  # Max 4 factors
-        return f"{discount_potential} discount from {factor_list}."
+    # Combine property metrics with key factors, prioritizing property-specific data
+    all_factors = factors + key_factors
+    
+    # Create more varied explanation based on distress level
+    if distress_score >= 85:
+        explanation = f"CRITICAL {discount_potential} opportunity from {', '.join(all_factors[:4])}."
+    elif distress_score >= 70:
+        explanation = f"HIGH {discount_potential} potential from {', '.join(all_factors[:4])}."
+    elif distress_score >= 55:
+        explanation = f"MODERATE {discount_potential} discount from {', '.join(all_factors[:3])}."
+    elif all_factors:
+        explanation = f"{discount_potential} discount from {', '.join(all_factors[:3])}."
     else:
-        return f"{discount_potential} discount potential from divorce proceedings."
+        explanation = f"{discount_potential} potential based on divorce proceedings."
+    
+    return explanation
 
 @app.route('/upload', methods=['POST'])
 def upload_file():

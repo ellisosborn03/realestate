@@ -84,30 +84,122 @@ class DivorceLeadAnalyzer:
             return full_address, ""
     
     def get_property_data(self, address1: str, address2: str) -> Dict:
-        """Get ATTOM property data with focus on equity/value"""
-        print("🏠 Fetching property valuation data...")
+        """Get comprehensive ATTOM property data for distress analysis"""
+        print("🏠 Fetching comprehensive property data...")
         
-        # AVM endpoint for current value
-        avm_url = "https://api.gateway.attomdata.com/propertyapi/v1.0.0/attomavm/detail"
-        avm_headers = {"accept": "application/json", "apikey": self.attom_key}
-        avm_params = {"address1": address1, "address2": address2}
-        
+        headers = {"accept": "application/json", "apikey": self.attom_key}
         property_data = {}
         
+        # 1. AVM endpoint for current value
         try:
-            resp = self.session.get(avm_url, params=avm_params, headers=avm_headers, timeout=10)
+            avm_url = "https://api.gateway.attomdata.com/propertyapi/v1.0.0/attomavm/detail"
+            avm_params = {"address1": address1, "address2": address2}
+            
+            resp = self.session.get(avm_url, params=avm_params, headers=headers, timeout=10)
             if resp.status_code == 200:
                 data = resp.json()
                 if data.get("status", {}).get("code") == 0:
                     properties = data.get("property", [])
                     if properties:
                         prop = properties[0]
+                        avm_data = prop.get("avm", {}).get("amount", {})
                         property_data.update({
-                            "current_value": prop.get("avm", {}).get("amount", {}).get("value", 0),
+                            "current_value": avm_data.get("value", 0),
+                            "value_high": avm_data.get("high", 0),
+                            "value_low": avm_data.get("low", 0),
+                            "confidence_score": prop.get("avm", {}).get("amount", {}).get("scr", 0),
                             "address": prop.get("address", {}).get("oneLine", ""),
                         })
         except Exception as e:
             print(f"    AVM Error: {e}")
+        
+        # 2. Property detail with mortgage info for liens/distress
+        try:
+            detail_url = "https://api.gateway.attomdata.com/propertyapi/v1.0.0/property/detailmortgage"
+            detail_params = {"address1": address1, "address2": address2}
+            
+            resp = self.session.get(detail_url, params=detail_params, headers=headers, timeout=10)
+            if resp.status_code == 200:
+                data = resp.json()
+                if data.get("status", {}).get("code") == 0:
+                    properties = data.get("property", [])
+                    if properties:
+                        prop = properties[0]
+                        
+                        # Building/property details
+                        building = prop.get("building", {})
+                        summary = prop.get("summary", {})
+                        
+                        property_data.update({
+                            "year_built": summary.get("yearbuilt", 0),
+                            "property_type": summary.get("proptype", ""),
+                            "building_size": building.get("size", {}).get("universalsize", 0),
+                            "lot_size": prop.get("lot", {}).get("lotsize1", 0),
+                            "bedrooms": building.get("rooms", {}).get("beds", 0),
+                            "bathrooms": building.get("rooms", {}).get("bathstotal", 0),
+                        })
+                        
+                        # Assessment/tax data for liens
+                        assessment = prop.get("assessment", {})
+                        if assessment:
+                            property_data.update({
+                                "assessed_value": assessment.get("assessed", {}).get("assdttlvalue", 0),
+                                "tax_amount": assessment.get("tax", {}).get("taxamt", 0),
+                                "tax_year": assessment.get("tax", {}).get("taxyear", 0),
+                            })
+                        
+                        # Owner information for absentee status
+                        owner = prop.get("owner", {})
+                        if owner:
+                            property_data.update({
+                                "owner_occupied": summary.get("absenteeInd", "").upper() == "OWNER OCCUPIED",
+                                "owner_name": owner.get("owner1", {}).get("lastname", ""),
+                            })
+        except Exception as e:
+            print(f"    Property Detail Error: {e}")
+        
+        # 3. Sales history for market activity and price trends
+        try:
+            sales_url = "https://api.gateway.attomdata.com/propertyapi/v1.0.0/saleshistory/detail"
+            sales_params = {"address1": address1, "address2": address2}
+            
+            resp = self.session.get(sales_url, params=sales_params, headers=headers, timeout=10)
+            if resp.status_code == 200:
+                data = resp.json()
+                if data.get("status", {}).get("code") == 0:
+                    properties = data.get("property", [])
+                    if properties:
+                        prop = properties[0]
+                        sales_history = prop.get("salehistory", [])
+                        
+                        if sales_history:
+                            # Most recent sale
+                            recent_sale = sales_history[0]
+                            property_data.update({
+                                "last_sale_date": recent_sale.get("saleTransDate", ""),
+                                "last_sale_price": recent_sale.get("amount", {}).get("saleamt", 0),
+                                "sales_history_count": len(sales_history),
+                            })
+                            
+                            # Price trend analysis
+                            if len(sales_history) >= 2:
+                                older_sale = sales_history[1]
+                                recent_price = recent_sale.get("amount", {}).get("saleamt", 0)
+                                older_price = older_sale.get("amount", {}).get("saleamt", 0)
+                                
+                                if recent_price > 0 and older_price > 0:
+                                    price_change = ((recent_price - older_price) / older_price) * 100
+                                    property_data["price_appreciation"] = price_change
+        except Exception as e:
+            print(f"    Sales History Error: {e}")
+        
+        # 4. Check for foreclosure/distressed data
+        try:
+            # Some ATTOM endpoints may include foreclosure status in property details
+            # This would require specific foreclosure API access
+            property_data["foreclosure_status"] = "Unknown"  # Placeholder
+        except Exception as e:
+            print(f"    Foreclosure Check Error: {e}")
         
         return property_data
     
@@ -150,13 +242,13 @@ class DivorceLeadAnalyzer:
         return signals
     
     def calculate_divorce_distress_score(self, signals: DivorceDistressSignals, property_data: Dict) -> Dict:
-        """Calculate divorce-specific distress score (much more aggressive)"""
-        print("📊 Calculating divorce distress score...")
+        """Calculate enhanced divorce-specific distress score with real data"""
+        print("📊 Calculating enhanced divorce distress score...")
         
         score = 25  # Base score for any divorce case
         risk_factors = ["Active divorce proceedings"]
         
-        # DIVORCE-SPECIFIC HIGH IMPACT FACTORS (60% of total score)
+        # DIVORCE-SPECIFIC HIGH IMPACT FACTORS (50% of total score)
         
         # Forced sale scenarios (20 points)
         if signals.forced_sale_timeline:
@@ -190,7 +282,7 @@ class DivorceLeadAnalyzer:
             score += 4
             risk_factors.append(f"Extended case duration ({signals.case_duration_months} months)")
         
-        # PROPERTY-SPECIFIC FACTORS (20% of total score)
+        # PROPERTY-SPECIFIC FACTORS FROM REAL DATA (30% of total score)
         
         property_value = property_data.get("current_value", 0)
         if property_value > 0:
@@ -206,6 +298,84 @@ class DivorceLeadAnalyzer:
                 score += 6
                 risk_factors.append("Required equity split")
         
+        # REAL PROPERTY AGE AND CONDITION FACTORS (10 points)
+        year_built = property_data.get("year_built", 0)
+        current_year = 2024
+        if year_built > 0:
+            property_age = current_year - year_built
+            if property_age > 30:
+                score += 5
+                risk_factors.append(f"Older property ({property_age} years)")
+                signals.building_age_risk = True
+            
+            if property_age > 50:
+                score += 3
+                risk_factors.append("High maintenance risk property")
+        
+        # OWNER OCCUPANCY STATUS (8 points)
+        if not property_data.get("owner_occupied", True):
+            score += 8
+            risk_factors.append("Non-owner occupied (absentee owner)")
+        
+        # TAX LIEN AND ASSESSMENT FACTORS (12 points)
+        tax_amount = property_data.get("tax_amount", 0)
+        assessed_value = property_data.get("assessed_value", 0)
+        
+        if tax_amount > 0 and assessed_value > 0:
+            tax_rate = (tax_amount / assessed_value) * 100
+            if tax_rate > 3.0:  # High tax rate indicating distress
+                score += 6
+                risk_factors.append(f"High tax burden ({tax_rate:.1f}%)")
+        
+        if property_data.get("tax_year", 0) < current_year - 1:
+            score += 6
+            risk_factors.append("Potential tax delinquency")
+        
+        # SALES HISTORY AND MARKET ACTIVITY (10 points)
+        sales_count = property_data.get("sales_history_count", 0)
+        if sales_count > 3:  # Frequent turnover indicates issues
+            score += 4
+            risk_factors.append("Frequent property turnover")
+        
+        last_sale_date = property_data.get("last_sale_date", "")
+        if last_sale_date:
+            try:
+                import datetime
+                sale_date = datetime.datetime.strptime(last_sale_date, "%Y-%m-%d")
+                days_since_sale = (datetime.datetime.now() - sale_date).days
+                
+                if days_since_sale < 365:  # Recent purchase may indicate flip
+                    score += 3
+                    risk_factors.append("Recent purchase (potential flip)")
+                elif days_since_sale > 3650:  # Long ownership, emotional attachment
+                    score += 2
+                    risk_factors.append("Long-term ownership (emotional attachment)")
+            except:
+                pass
+        
+        # PRICE APPRECIATION TRENDS (8 points)
+        price_appreciation = property_data.get("price_appreciation", 0)
+        if price_appreciation < -10:  # Declining value
+            score += 8
+            risk_factors.append(f"Declining property value ({price_appreciation:.1f}%)")
+        elif price_appreciation < 0:
+            score += 4
+            risk_factors.append("Negative price appreciation")
+        
+        # AVM CONFIDENCE AND VALUE RANGE (6 points)
+        confidence_score = property_data.get("confidence_score", 0)
+        if confidence_score < 70:  # Low confidence indicates uncertainty
+            score += 3
+            risk_factors.append("Property valuation uncertainty")
+        
+        value_high = property_data.get("value_high", 0)
+        value_low = property_data.get("value_low", 0)
+        if value_high > 0 and value_low > 0:
+            value_range = ((value_high - value_low) / property_value) * 100
+            if value_range > 20:  # Wide valuation range
+                score += 3
+                risk_factors.append("Wide property value range")
+        
         # MARKET TIMING FACTORS (10% of total score)
         
         # Extract ZIP for market analysis
@@ -215,14 +385,15 @@ class DivorceLeadAnalyzer:
             
             # Florida market conditions affecting divorce sales
             florida_divorce_markets = {
-                "33403": {"buyer_market": False, "slow_season": False},  # Lake Park - stable
-                "33463": {"buyer_market": False, "slow_season": False},  # Greenacres - good
-                "33418": {"buyer_market": True, "slow_season": True},   # PB Gardens - slower
-                "33467": {"buyer_market": True, "slow_season": True},   # Lake Worth - challenging
-                "33460": {"buyer_market": True, "slow_season": True},   # Lake Worth - challenging
+                "33403": {"buyer_market": False, "slow_season": False, "absorption_days": 45},  # Lake Park
+                "33463": {"buyer_market": False, "slow_season": False, "absorption_days": 35},  # Greenacres
+                "33418": {"buyer_market": True, "slow_season": True, "absorption_days": 85},   # PB Gardens
+                "33467": {"buyer_market": True, "slow_season": True, "absorption_days": 95},   # Lake Worth
+                "33460": {"buyer_market": True, "slow_season": True, "absorption_days": 90},   # Lake Worth
             }
             
-            market_info = florida_divorce_markets.get(zip_code, {"buyer_market": True, "slow_season": False})
+            market_info = florida_divorce_markets.get(zip_code, 
+                {"buyer_market": True, "slow_season": False, "absorption_days": 75})
             
             if market_info["buyer_market"]:
                 score += 6
@@ -233,8 +404,15 @@ class DivorceLeadAnalyzer:
                 score += 4
                 risk_factors.append("Seasonal timing challenges")
                 signals.seasonal_timing_poor = True
+                
+            # Market absorption rate (days on market expectation)
+            expected_dom = market_info["absorption_days"]
+            if expected_dom > 75:
+                score += 3
+                risk_factors.append(f"Slow market absorption ({expected_dom} days)")
+                signals.market_absorption_rate = expected_dom / 30  # Convert to months
         
-        # DESPERATION MULTIPLIERS
+        # DESPERATION MULTIPLIERS (10% of total score)
         
         # Time pressure creates desperation
         if signals.court_ordered_sale_deadline > 0 and signals.court_ordered_sale_deadline < 120:
@@ -245,6 +423,14 @@ class DivorceLeadAnalyzer:
         if signals.children_involved and signals.case_duration_months > 18:
             score += 8
             risk_factors.append("Extended divorce with children involved")
+        
+        # Property value vs debt stress
+        last_sale_price = property_data.get("last_sale_price", 0)
+        if last_sale_price > 0 and property_value > 0:
+            if property_value < last_sale_price * 0.95:  # Underwater or losing equity
+                score += 6
+                risk_factors.append("Potential underwater mortgage")
+                signals.underwater_mortgage = True
         
         # Cap at 100
         final_score = min(score, 100)
@@ -272,8 +458,13 @@ class DivorceLeadAnalyzer:
             "discount_potential": discount_potential,
             "risk_factors": risk_factors,
             "total_factors": len(risk_factors),
-            "confidence": min(95, 70 + len(risk_factors) * 3),  # High confidence for divorce cases
-            "urgency": "HIGH" if signals.court_ordered_sale_deadline < 90 else "MEDIUM"
+            "confidence": min(95, 70 + len(risk_factors) * 2),  # High confidence with real data
+            "urgency": "HIGH" if signals.court_ordered_sale_deadline < 90 else "MEDIUM",
+            "property_value": property_value,
+            "year_built": year_built,
+            "tax_liens": tax_amount,
+            "days_on_market": 0,  # To be enhanced with listing data
+            "price_reductions": 0,  # To be enhanced with listing data
         }
     
     def analyze_divorce_lead(self, address: str, case_data: Dict = None) -> Dict:
