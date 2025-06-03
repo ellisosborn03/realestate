@@ -7,7 +7,7 @@ import os
 import re
 
 # Add the current directory to Python path to import from app.py
-sys.path.append(os.path.dirname(os.path.abspath(__file__)))
+sys.path.append(os.path.join(os.path.dirname(__file__), '..', 'core'))
 
 from app import generate_distress_explanation
 
@@ -46,7 +46,7 @@ def extract_property_data_from_address(address):
 def update_all_explanations():
     """Update all existing properties with enhanced explanation format"""
     
-    conn = sqlite3.connect('distress_analysis.db')
+    conn = sqlite3.connect('../data/distress_analysis.db')
     cursor = conn.cursor()
     
     # Get all properties

@@ -12,10 +12,11 @@ from urllib.parse import quote_plus
 import sqlite3
 import json
 from datetime import datetime
+import sys
 
 app = Flask(__name__)
-app.config['UPLOAD_FOLDER'] = 'uploads'
-app.config['DATABASE'] = 'distress_analysis.db'
+app.config['UPLOAD_FOLDER'] = '../uploads'
+app.config['DATABASE'] = '../data/distress_analysis.db'
 
 # Configure logging
 logging.basicConfig(
@@ -808,7 +809,7 @@ def distress_single():
             'absenteeOwner': row.get('absenteeOwner', False) or False,
             'absorptionRate': row.get('absorptionRate', 0) or 0
         }
-        from src.services.calculateDistressScore import calculateDistressScore
+        from calculate_distress_score import calculateDistressScore
         result = calculateDistressScore(attom_data)
         return jsonify({'success': True, 'data': result})
     except Exception as e:
