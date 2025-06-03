@@ -15,8 +15,8 @@ from datetime import datetime
 import sys
 
 app = Flask(__name__)
-app.config['UPLOAD_FOLDER'] = '../uploads'
-app.config['DATABASE'] = '../data/distress_analysis.db'
+app.config['UPLOAD_FOLDER'] = os.path.join(os.path.dirname(__file__), '..', 'uploads')
+app.config['DATABASE'] = os.path.join(os.path.dirname(__file__), '..', 'data', 'distress_analysis.db')
 
 # Configure logging
 logging.basicConfig(
