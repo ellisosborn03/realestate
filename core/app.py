@@ -144,6 +144,10 @@ def get_properties():
             'distress_explanation': row[13]
         })
     
+    # Add attom_available flag
+    for prop in properties:
+        prop['attom_available'] = bool(prop.get('property_value') or prop.get('attom_id'))
+    
     conn.close()
     return jsonify({'properties': properties})
 

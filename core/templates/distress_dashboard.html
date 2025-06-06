@@ -183,6 +183,16 @@
                             </select>
                         </div>
                     </div>
+                    <div class="row mt-3">
+                        <div class="col-12">
+                            <div class="form-check">
+                                <input class="form-check-input" type="checkbox" id="attomAvailableFilter">
+                                <label class="form-check-label text-white" for="attomAvailableFilter">
+                                    <i class="fas fa-filter me-2"></i>Only show properties with ATTOM data
+                                </label>
+                            </div>
+                        </div>
+                    </div>
                 </div>
             </div>
         </div>
@@ -243,6 +253,7 @@
         document.getElementById('selectAllFiles').addEventListener('change', handleSelectAllFiles);
         document.getElementById('analysisTypeFilter').addEventListener('change', applyFilters);
         document.getElementById('riskLevelFilter').addEventListener('change', applyFilters);
+        document.getElementById('attomAvailableFilter').addEventListener('change', applyFilters);
 
         async function loadSourceFiles() {
             try {
@@ -305,20 +316,22 @@
             applyFilters();
         }
 
+        function isAttomAvailable(property) {
+            return property.attom_available || (property.property_value && property.property_value > 0);
+        }
+
         function applyFilters() {
             const selectedFiles = Array.from(document.querySelectorAll('.source-file-checkbox:checked')).map(cb => cb.value);
             const analysisType = document.getElementById('analysisTypeFilter').value;
             const riskLevel = document.getElementById('riskLevelFilter').value;
+            const attomOnly = document.getElementById('attomAvailableFilter').checked;
 
             filteredProperties = allProperties.filter(property => {
-                // If no files are selected, show nothing
                 if (selectedFiles.length === 0) return false;
-                
-                // Check if property's source file is in selected files
                 if (!selectedFiles.includes(property.source_file)) return false;
-                
                 if (analysisType && property.analysis_type !== analysisType) return false;
                 if (riskLevel && property.risk_level !== riskLevel) return false;
+                if (attomOnly && !isAttomAvailable(property)) return false;
                 return true;
             });
 
@@ -384,9 +397,19 @@
             }
 
             tbody.innerHTML = filteredProperties.map(property => {
-                const riskClass = `risk-${property.risk_level?.toLowerCase().replace('-', '-')}`;
-                const valueDisplay = property.property_value > 0 ? 
+                const riskClass = property.attom_available ? 
+                    `risk-${property.risk_level?.toLowerCase().replace('-', '-')}` : '';
+                const valueDisplay = property.attom_available && property.property_value > 0 ? 
                     `$${property.property_value.toLocaleString()}` : 'N/A';
+                const distressScore = property.attom_available ? 
+                    `${property.distress_score}/100` : 'N/A';
+                const riskLevel = property.attom_available ? 
+                    `<span class="risk-badge ${riskClass}">${property.risk_level}</span>` : 'N/A';
+                const discountPotential = property.attom_available ? 
+                    `<strong>${property.discount_potential}</strong>` : 'N/A';
+                const explanation = property.attom_available ? 
+                    property.distress_explanation || 'No explanation available' : 
+                    'Address not found in ATTOM database';
                 
                 return `
                     <tr>
@@ -398,24 +421,20 @@
                             </div>
                         </td>
                         <td>
-                            <span class="distress-score">${property.distress_score}/100</span>
-                            <br><small class="text-muted">${property.confidence}% confidence</small>
+                            <span class="distress-score">${distressScore}</span>
+                            ${property.attom_available ? `<br><small class="text-muted">${property.confidence}% confidence</small>` : ''}
                         </td>
-                        <td>
-                            <span class="risk-badge ${riskClass}">
-                                ${property.risk_level}
-                            </span>
-                        </td>
+                        <td>${riskLevel}</td>
                         <td class="property-value">${valueDisplay}</td>
                         <td>
-                            <strong>${property.discount_potential}</strong>
-                            ${property.property_value > 0 ? 
+                            ${discountPotential}
+                            ${property.attom_available && property.property_value > 0 ? 
                                 `<br><small class="text-success">$${calculateDiscountValue(property)}</small>` : ''
                             }
                         </td>
                         <td>
                             <div class="explanation-text">
-                                ${property.distress_explanation || 'No explanation available'}
+                                ${explanation}
                             </div>
                         </td>
                         <td>
