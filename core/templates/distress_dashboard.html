@@ -82,6 +82,23 @@
         .loading-spinner {
             display: none;
         }
+        
+        .comp-sale {
+            padding: 4px 8px;
+            margin: 2px 0;
+            border-radius: 4px;
+            background: rgba(255, 255, 255, 0.1);
+        }
+        
+        .comp-price {
+            font-weight: bold;
+            color: #4CAF50;
+        }
+        
+        .comp-date {
+            font-size: 0.8em;
+            color: #aaa;
+        }
     </style>
 </head>
 <body>
@@ -216,9 +233,11 @@
                             <thead>
                                 <tr>
                                     <th>Address</th>
+                                    <th>ATTOM Address/Valuation</th>
                                     <th>Distress Score</th>
                                     <th>Risk Level</th>
                                     <th>Property Value</th>
+                                    <th>Comparable Sales</th>
                                     <th>Discount Potential</th>
                                     <th>Explanation</th>
                                     <th>Source</th>
@@ -404,46 +423,55 @@
                 const distressScore = property.attom_available ? 
                     `${property.distress_score}/100` : 'N/A';
                 const riskLevel = property.attom_available ? 
-                    `<span class="risk-badge ${riskClass}">${property.risk_level}</span>` : 'N/A';
+                    `<span class=\"risk-badge ${riskClass}\">${property.risk_level}</span>` : 'N/A';
                 const discountPotential = property.attom_available ? 
                     `<strong>${property.discount_potential}</strong>` : 'N/A';
                 const explanation = property.attom_available ? 
                     property.distress_explanation || 'No explanation available' : 
                     'Address not found in ATTOM database';
-                
+                // Format comparable sales
+                let comparableSalesHtml = 'N/A';
+                if (property.comparable_sales && property.comparable_sales.length > 0) {
+                    const comps = property.comparable_sales.slice(0, 3); // Show top 3 comps
+                    comparableSalesHtml = comps.map(comp => {
+                        const price = comp.sale_price ? `$${comp.sale_price.toLocaleString()}` : 'N/A';
+                        const date = comp.sale_date ? new Date(comp.sale_date).toLocaleDateString() : 'N/A';
+                        return `<div class=\"comp-sale\">
+                            <div class=\"comp-price\">${price}</div>
+                            <div class=\"comp-date\">${date}</div>
+                        </div>`;
+                    }).join('');
+                }
+                // ATTOM Address/Valuation column
+                let attomVal = 'N/A';
+                if (property.attom_available && property.property_value > 0) {
+                    attomVal = `<span class=\"text-success\">${property.address}</span>`;
+                } else if (property.attom_available) {
+                    attomVal = `<span class=\"text-warning\">${property.address}</span>`;
+                }
+                // Expanded address/case/party
+                let addressBlock = `<strong>${property.address}</strong>`;
+                if (property.case_id) addressBlock += `<br><small class=\"text-muted\">Case: ${property.case_id}</small>`;
+                if (property.party_name) addressBlock += `<br><small class=\"text-muted\">Party: ${property.party_name}</small>`;
+                // Distress score with confidence
+                let scoreBlock = `<span class=\"distress-score\">${distressScore}</span>`;
+                if (property.attom_available && property.confidence) scoreBlock += `<br><small class=\"text-muted\">${property.confidence}% confidence</small>`;
+                // Source block
+                let sourceBlock = `<small class=\"text-muted\">${property.source_file || 'Unknown'}`;
+                if (property.analysis_type) sourceBlock += `<br>${property.analysis_type}`;
+                if (property.created_at) sourceBlock += `<br>${new Date(property.created_at).toLocaleDateString()}`;
+                sourceBlock += `</small>`;
                 return `
                     <tr>
-                        <td>
-                            <div>
-                                <strong>${property.address}</strong>
-                                ${property.case_id ? `<br><small class="text-muted">Case: ${property.case_id}</small>` : ''}
-                                ${property.party_name ? `<br><small class="text-muted">Party: ${property.party_name}</small>` : ''}
-                            </div>
-                        </td>
-                        <td>
-                            <span class="distress-score">${distressScore}</span>
-                            ${property.attom_available ? `<br><small class="text-muted">${property.confidence}% confidence</small>` : ''}
-                        </td>
+                        <td>${addressBlock}</td>
+                        <td>${attomVal}</td>
+                        <td>${scoreBlock}</td>
                         <td>${riskLevel}</td>
-                        <td class="property-value">${valueDisplay}</td>
-                        <td>
-                            ${discountPotential}
-                            ${property.attom_available && property.property_value > 0 ? 
-                                `<br><small class="text-success">$${calculateDiscountValue(property)}</small>` : ''
-                            }
-                        </td>
-                        <td>
-                            <div class="explanation-text">
-                                ${explanation}
-                            </div>
-                        </td>
-                        <td>
-                            <small class="text-muted">
-                                ${property.source_file || 'Unknown'}
-                                <br>${property.analysis_type || 'general'}
-                                <br>${new Date(property.created_at).toLocaleDateString()}
-                            </small>
-                        </td>
+                        <td>${valueDisplay}</td>
+                        <td>${comparableSalesHtml}</td>
+                        <td>${discountPotential}</td>
+                        <td>${explanation}</td>
+                        <td>${sourceBlock}</td>
                     </tr>
                 `;
             }).join('');

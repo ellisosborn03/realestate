@@ -49,7 +49,8 @@ def init_database():
             case_id TEXT,
             party_name TEXT,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            distress_explanation TEXT
+            distress_explanation TEXT,
+            comparable_sales TEXT
         )
     ''')
     
@@ -86,6 +87,10 @@ def clean_nan(obj):
 def index():
     return render_template('index.html')
 
+@app.route('/favicon.ico')
+def favicon():
+    return '', 204  # Return no content for favicon requests
+
 @app.route('/distress-dashboard')
 def distress_dashboard():
     """New page showing all analyzed properties with filtering"""
@@ -105,7 +110,8 @@ def get_properties():
         SELECT 
             id, address, distress_score, risk_level, discount_potential, 
             property_value, confidence, risk_factors, analysis_type, 
-            source_file, case_id, party_name, created_at, distress_explanation
+            source_file, case_id, party_name, created_at, distress_explanation,
+            comparable_sales
         FROM properties
         WHERE 1=1
     '''
@@ -127,6 +133,7 @@ def get_properties():
     properties = []
     for row in rows:
         risk_factors = json.loads(row[7]) if row[7] else []
+        comparable_sales = json.loads(row[14]) if row[14] else []
         properties.append({
             'id': row[0],
             'address': row[1],
@@ -141,7 +148,8 @@ def get_properties():
             'case_id': row[10],
             'party_name': row[11],
             'created_at': row[12],
-            'distress_explanation': row[13]
+            'distress_explanation': row[13],
+            'comparable_sales': comparable_sales
         })
     
     # Add attom_available flag
@@ -322,8 +330,8 @@ def save_analysis():
             INSERT INTO properties 
             (address, distress_score, risk_level, discount_potential, property_value,
              confidence, risk_factors, analysis_type, source_file, case_id, 
-             party_name, distress_explanation)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+             party_name, distress_explanation, comparable_sales)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ''', (
             data.get('address'),
             data.get('distress_score'),
@@ -336,7 +344,8 @@ def save_analysis():
             data.get('source_file'),
             data.get('case_id'),
             data.get('party_name'),
-            explanation
+            explanation,
+            json.dumps(data.get('comparable_sales', []))
         ))
         
         conn.commit()
@@ -820,6 +829,97 @@ def distress_single():
         import traceback
         app.logger.error(f"Distress error: {e}\n{traceback.format_exc()}")
         return jsonify({'error': str(e)}), 500
+
+@app.route('/api/comparable-sales/<prop_id>')
+def get_comparable_sales(prop_id):
+    """Get comparable sales data from ATTOM API"""
+    url = f"https://api.gateway.attomdata.com/propertyapi/v1.0.0/salescomparables/propid/{prop_id}"
+    params = {
+        'searchType': 'Radius',
+        'minComps': 3,
+        'maxComps': 10,
+        'miles': 5,
+        'sameCity': 'false',
+        'useSameTargetCode': 'true',
+        'bedroomsRange': 2,
+        'bathroomRange': 2,
+        'sqFeetRange': 600,
+        'lotSizeRange': 2000,
+        'saleDateRange': 6,
+        'include0SalesAmounts': 'false',
+        'includeFullSalesOnly': 'true',
+        'ownerOccupied': 'Both',
+        'distressed': 'IncludeDistressed'
+    }
+    headers = {
+        'accept': 'application/json',
+        'apikey': 'ad91f2f30426f1ee54aec35791aaa044'
+    }
+    
+    try:
+        resp = requests.get(url, params=params, headers=headers, timeout=10)
+        resp.raise_for_status()
+        data = resp.json()
+        
+        # Extract comparable sales if available
+        comps = data.get('RESPONSE_GROUP', {}).get('RESPONSE', {}).get('RESPONSE_DATA', {}).get('PROPERTY_INFORMATION_RESPONSE_ext', {}).get('SUBJECT_PROPERTY_ext', {}).get('PROPERTY', [])
+        
+        return jsonify({
+            'status': 'success',
+            'comparable_sales': comps
+        })
+    except Exception as e:
+        logging.error(f"Error fetching comparable sales: {e}")
+        return jsonify({
+            'status': 'error',
+            'message': str(e)
+        }), 500
+
+@app.route('/api/comparable-sales-by-address', methods=['POST'])
+def get_comparable_sales_by_address():
+    data = request.json
+    address1 = data.get('address1')
+    address2 = data.get('address2')
+    if not address1 or not address2:
+        return jsonify({'status': 'error', 'message': 'address1 and address2 required'}), 400
+    # Step 1: Lookup property detail to get PropID
+    url = "https://api.gateway.attomdata.com/propertyapi/v1.0.0/property/detail"
+    params = {'address1': address1, 'address2': address2}
+    headers = {'accept': 'application/json', 'apikey': 'ad91f2f30426f1ee54aec35791aaa044'}
+    try:
+        resp = requests.get(url, params=params, headers=headers, timeout=10)
+        resp.raise_for_status()
+        data = resp.json()
+        if data.get('status', {}).get('code') == 0 and data.get('property'):
+            prop_id = data['property'][0]['identifier']['Id']
+            # Step 2: Get comparable sales
+            comps_url = f"https://api.gateway.attomdata.com/propertyapi/v1.0.0/salescomparables/propid/{prop_id}"
+            comps_params = {
+                'searchType': 'Radius',
+                'minComps': 3,
+                'maxComps': 10,
+                'miles': 5,
+                'sameCity': 'false',
+                'useSameTargetCode': 'true',
+                'bedroomsRange': 2,
+                'bathroomRange': 2,
+                'sqFeetRange': 600,
+                'lotSizeRange': 2000,
+                'saleDateRange': 6,
+                'include0SalesAmounts': 'false',
+                'includeFullSalesOnly': 'true',
+                'ownerOccupied': 'Both',
+                'distressed': 'IncludeDistressed'
+            }
+            comps_resp = requests.get(comps_url, params=comps_params, headers=headers, timeout=10)
+            comps_resp.raise_for_status()
+            comps_data = comps_resp.json()
+            comps = comps_data.get('RESPONSE_GROUP', {}).get('RESPONSE', {}).get('RESPONSE_DATA', {}).get('PROPERTY_INFORMATION_RESPONSE_ext', {}).get('SUBJECT_PROPERTY_ext', {}).get('PROPERTY', [])
+            return jsonify({'status': 'success', 'prop_id': prop_id, 'comparable_sales': comps})
+        else:
+            return jsonify({'status': 'error', 'message': 'Property not found for address'}), 404
+    except Exception as e:
+        return jsonify({'status': 'error', 'message': str(e)}), 500
 
 if __name__ == '__main__':
     try:
