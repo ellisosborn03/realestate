@@ -147,7 +147,11 @@ def get_properties():
     # Add attom_available flag
     for prop in properties:
         prop['attom_available'] = bool(prop.get('property_value') or prop.get('attom_id'))
-    
+
+    # Debug print: show the property id and dict for each property
+    for prop in properties:
+        print(f'\n[DEBUG] Property ID: {prop.get("id")} | Property dict: {prop}', flush=True)
+
     conn.close()
     return jsonify({'properties': properties})
 
@@ -823,8 +827,8 @@ def distress_single():
 
 if __name__ == '__main__':
     try:
-        # Always run on port 5001 for local dev
-        run_simple('127.0.0.1', 5001, app, use_debugger=True, use_reloader=True)
+        port = int(os.environ.get('PORT', 5001))
+        run_simple('127.0.0.1', port, app, use_debugger=True, use_reloader=True)
     except Exception as e:
         logger.error(f"Failed to start server: {str(e)}")
         logger.error(traceback.format_exc()) 

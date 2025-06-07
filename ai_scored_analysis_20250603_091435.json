@@ -1,0 +1,45 @@
+{
+  "raw_data": {
+    "address": "6775 TURTLE POINT DR, Lake Worth, FL 33467",
+    "timestamp": "2025-06-03T09:08:14.672024",
+    "ltv": null,
+    "dom": null,
+    "medianDom": null,
+    "listOrig": null,
+    "listCurr": 802326,
+    "preFC": false,
+    "taxDelinq": false,
+    "taxLienLate": false,
+    "absentee": false,
+    "liens": false,
+    "viol": 0,
+    "absorp": null,
+    "rentDemand": null,
+    "incomeTrend": null,
+    "ownerAge": null,
+    "propAge": null,
+    "criticalIllness": false,
+    "incompleteConstruction": false,
+    "crime": "Low",
+    "insurance": "Full",
+    "layoffs": false,
+    "coastalRisk": "Low",
+    "sources": [
+      "ATTOM_AVM",
+      "ATTOM_DETAIL",
+      "ATTOM_SALES",
+      "ATTOM_TAX",
+      "ATTOM_DISTRESS",
+      "CRIME_API",
+      "COASTAL_RISK",
+      "FEMA_NFIP"
+    ]
+  },
+  "ai_analysis": {
+    "score": 50,
+    "conf": 0.5,
+    "discount": "10-15%",
+    "reason": "Fallback scoring due to AI analysis failure"
+  },
+  "combined_score": 50
+}

@@ -137,8 +137,13 @@
             </div>
             <div class="col-md-3">
                 <div class="stats-card">
-                    <h3 class="h4 mb-1" id="totalValue">$0</h3>
-                    <small class="text-muted">Total Portfolio Value</small>
+                    <label class="form-label mb-1">Properties Shown</label>
+                    <select class="form-select" id="numPropertiesShown">
+                        <option value="25">25</option>
+                        <option value="50">50</option>
+                        <option value="100">100</option>
+                        <option value="all">All</option>
+                    </select>
                 </div>
             </div>
         </div>
@@ -254,6 +259,10 @@
         document.getElementById('analysisTypeFilter').addEventListener('change', applyFilters);
         document.getElementById('riskLevelFilter').addEventListener('change', applyFilters);
         document.getElementById('attomAvailableFilter').addEventListener('change', applyFilters);
+        document.getElementById('numPropertiesShown').addEventListener('change', function() {
+            updateStats();
+            renderTable();
+        });
 
         async function loadSourceFiles() {
             try {
@@ -367,25 +376,30 @@
             }
         }
 
+        function getVisibleProperties() {
+            const numShown = document.getElementById('numPropertiesShown').value;
+            if (numShown === 'all') return filteredProperties;
+            return filteredProperties.slice(0, parseInt(numShown));
+        }
+
         function updateStats() {
-            const total = filteredProperties.length;
+            const visible = getVisibleProperties();
+            const total = visible.length;
             const avgScore = total > 0 ? 
-                Math.round(filteredProperties.reduce((sum, p) => sum + (p.distress_score || 0), 0) / total) : 0;
-            const highRisk = filteredProperties.filter(p => 
+                Math.round(visible.reduce((sum, p) => sum + (p.distress_score || 0), 0) / total) : 0;
+            const highRisk = visible.filter(p => 
                 p.risk_level === 'CRITICAL' || p.risk_level === 'HIGH').length;
-            const totalValue = filteredProperties.reduce((sum, p) => sum + (p.property_value || 0), 0);
+            const totalValue = visible.reduce((sum, p) => sum + (p.property_value || 0), 0);
 
             document.getElementById('totalProperties').textContent = total;
             document.getElementById('avgScore').textContent = avgScore;
             document.getElementById('highRiskCount').textContent = highRisk;
-            document.getElementById('totalValue').textContent = 
-                totalValue > 0 ? `$${(totalValue / 1000000).toFixed(1)}M` : '$0';
         }
 
         function renderTable() {
             const tbody = document.getElementById('propertiesTableBody');
-            
-            if (filteredProperties.length === 0) {
+            const propsToShow = getVisibleProperties();
+            if (propsToShow.length === 0) {
                 tbody.innerHTML = `
                     <tr>
                         <td colspan="7" class="text-center text-muted p-4">
@@ -395,8 +409,7 @@
                 `;
                 return;
             }
-
-            tbody.innerHTML = filteredProperties.map(property => {
+            tbody.innerHTML = propsToShow.map(property => {
                 const riskClass = property.attom_available ? 
                     `risk-${property.risk_level?.toLowerCase().replace('-', '-')}` : '';
                 const valueDisplay = property.attom_available && property.property_value > 0 ? 
