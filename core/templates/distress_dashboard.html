@@ -137,8 +137,13 @@
             </div>
             <div class="col-md-3">
                 <div class="stats-card">
-                    <h3 class="h4 mb-1" id="totalValue">$0</h3>
-                    <small class="text-muted">Total Portfolio Value</small>
+                    <label class="form-label mb-1">Properties Shown</label>
+                    <select class="form-select" id="numPropertiesShown">
+                        <option value="25">25</option>
+                        <option value="50">50</option>
+                        <option value="100">100</option>
+                        <option value="all">All</option>
+                    </select>
                 </div>
             </div>
         </div>
@@ -183,6 +188,16 @@
                             </select>
                         </div>
                     </div>
+                    <div class="row mt-3">
+                        <div class="col-12">
+                            <div class="form-check">
+                                <input class="form-check-input" type="checkbox" id="attomAvailableFilter">
+                                <label class="form-check-label text-white" for="attomAvailableFilter">
+                                    <i class="fas fa-filter me-2"></i>Only show properties with ATTOM data
+                                </label>
+                            </div>
+                        </div>
+                    </div>
                 </div>
             </div>
         </div>
@@ -207,16 +222,14 @@
                                 <tr>
                                     <th>Address</th>
                                     <th>Distress Score</th>
-                                    <th>Risk Level</th>
                                     <th>Property Value</th>
-                                    <th>Discount Potential</th>
                                     <th>Explanation</th>
                                     <th>Source</th>
                                 </tr>
                             </thead>
                             <tbody id="propertiesTableBody">
                                 <tr>
-                                    <td colspan="7" class="text-center text-muted p-4">
+                                    <td colspan="5" class="text-center text-muted p-4">
                                         No properties found. Upload and analyze some data first.
                                     </td>
                                 </tr>
@@ -243,6 +256,11 @@
         document.getElementById('selectAllFiles').addEventListener('change', handleSelectAllFiles);
         document.getElementById('analysisTypeFilter').addEventListener('change', applyFilters);
         document.getElementById('riskLevelFilter').addEventListener('change', applyFilters);
+        document.getElementById('attomAvailableFilter').addEventListener('change', applyFilters);
+        document.getElementById('numPropertiesShown').addEventListener('change', function() {
+            updateStats();
+            renderTable();
+        });
 
         async function loadSourceFiles() {
             try {
@@ -305,20 +323,22 @@
             applyFilters();
         }
 
+        function isAttomAvailable(property) {
+            return property.attom_available || (property.property_value && property.property_value > 0);
+        }
+
         function applyFilters() {
             const selectedFiles = Array.from(document.querySelectorAll('.source-file-checkbox:checked')).map(cb => cb.value);
             const analysisType = document.getElementById('analysisTypeFilter').value;
             const riskLevel = document.getElementById('riskLevelFilter').value;
+            const attomOnly = document.getElementById('attomAvailableFilter').checked;
 
             filteredProperties = allProperties.filter(property => {
-                // If no files are selected, show nothing
                 if (selectedFiles.length === 0) return false;
-                
-                // Check if property's source file is in selected files
                 if (!selectedFiles.includes(property.source_file)) return false;
-                
                 if (analysisType && property.analysis_type !== analysisType) return false;
                 if (riskLevel && property.risk_level !== riskLevel) return false;
+                if (attomOnly && !isAttomAvailable(property)) return false;
                 return true;
             });
 
@@ -343,7 +363,7 @@
                 console.error('Error loading properties:', error);
                 document.getElementById('propertiesTableBody').innerHTML = `
                     <tr>
-                        <td colspan="7" class="text-center text-danger p-4">
+                        <td colspan="5" class="text-center text-danger p-4">
                             <i class="fas fa-exclamation-triangle me-2"></i>
                             Error loading properties: ${error.message}
                         </td>
@@ -354,94 +374,74 @@
             }
         }
 
+        function getVisibleProperties() {
+            const numShown = document.getElementById('numPropertiesShown').value;
+            if (numShown === 'all') return filteredProperties;
+            return filteredProperties.slice(0, parseInt(numShown));
+        }
+
         function updateStats() {
-            const total = filteredProperties.length;
+            const visible = getVisibleProperties();
+            const total = visible.length;
             const avgScore = total > 0 ? 
-                Math.round(filteredProperties.reduce((sum, p) => sum + (p.distress_score || 0), 0) / total) : 0;
-            const highRisk = filteredProperties.filter(p => 
+                Math.round(visible.reduce((sum, p) => sum + (p.distress_score || 0), 0) / total) : 0;
+            const highRisk = visible.filter(p => 
                 p.risk_level === 'CRITICAL' || p.risk_level === 'HIGH').length;
-            const totalValue = filteredProperties.reduce((sum, p) => sum + (p.property_value || 0), 0);
+            const totalValue = visible.reduce((sum, p) => sum + (p.property_value || 0), 0);
 
             document.getElementById('totalProperties').textContent = total;
             document.getElementById('avgScore').textContent = avgScore;
             document.getElementById('highRiskCount').textContent = highRisk;
-            document.getElementById('totalValue').textContent = 
-                totalValue > 0 ? `$${(totalValue / 1000000).toFixed(1)}M` : '$0';
         }
 
         function renderTable() {
             const tbody = document.getElementById('propertiesTableBody');
-            
-            if (filteredProperties.length === 0) {
+            const propsToShow = getVisibleProperties();
+            if (propsToShow.length === 0) {
                 tbody.innerHTML = `
                     <tr>
-                        <td colspan="7" class="text-center text-muted p-4">
+                        <td colspan="5" class="text-center text-muted p-4">
                             No properties match the current filters.
                         </td>
                     </tr>
                 `;
                 return;
             }
-
-            tbody.innerHTML = filteredProperties.map(property => {
-                const riskClass = `risk-${property.risk_level?.toLowerCase().replace('-', '-')}`;
-                const valueDisplay = property.property_value > 0 ? 
+            tbody.innerHTML = propsToShow.map(property => {
+                const valueDisplay = property.attom_available && property.property_value > 0 ? 
                     `$${property.property_value.toLocaleString()}` : 'N/A';
-                
+                const distressScore = property.attom_available ? 
+                    `${property.distress_score}/100` : 'N/A';
+                const explanation = property.attom_available ? 
+                    property.distress_explanation || 'No explanation available' : 
+                    'Address not found in ATTOM database';
                 return `
                     <tr>
                         <td>
-                            <div>
-                                <strong>${property.address}</strong>
-                                ${property.case_id ? `<br><small class="text-muted">Case: ${property.case_id}</small>` : ''}
-                                ${property.party_name ? `<br><small class="text-muted">Party: ${property.party_name}</small>` : ''}
-                            </div>
+                            <strong>${property.address}</strong>
+                            ${property.case_id ? `<br><small class="text-muted">Case: ${property.case_id}</small>` : ''}
+                            ${property.party_name ? `<br><small class="text-muted">Party: ${property.party_name}</small>` : ''}
                         </td>
                         <td>
-                            <span class="distress-score">${property.distress_score}/100</span>
-                            <br><small class="text-muted">${property.confidence}% confidence</small>
-                        </td>
-                        <td>
-                            <span class="risk-badge ${riskClass}">
-                                ${property.risk_level}
-                            </span>
+                            <span class="distress-score">${distressScore}</span>
+                            ${property.attom_available ? `<br><small class="text-muted">${property.confidence}% confidence</small>` : ''}
                         </td>
                         <td class="property-value">${valueDisplay}</td>
                         <td>
-                            <strong>${property.discount_potential}</strong>
-                            ${property.property_value > 0 ? 
-                                `<br><small class="text-success">$${calculateDiscountValue(property)}</small>` : ''
-                            }
-                        </td>
-                        <td>
                             <div class="explanation-text">
-                                ${property.distress_explanation || 'No explanation available'}
+                                ${explanation}
                             </div>
                         </td>
                         <td>
                             <small class="text-muted">
                                 ${property.source_file || 'Unknown'}
                                 <br>${property.analysis_type || 'general'}
-                                <br>${new Date(property.created_at).toLocaleDateString()}
+                                <br>${property.created_at ? new Date(property.created_at).toLocaleDateString() : ''}
                             </small>
                         </td>
                     </tr>
                 `;
             }).join('');
-        }
-
-        function calculateDiscountValue(property) {
-            if (!property.property_value || !property.discount_potential) return '0';
-            
-            const match = property.discount_potential.match(/(\d+)-(\d+)%/);
-            if (!match) return '0';
-            
-            const minDiscount = parseInt(match[1]);
-            const maxDiscount = parseInt(match[2]);
-            const avgDiscount = (minDiscount + maxDiscount) / 2;
-            
-            const discountValue = property.property_value * (avgDiscount / 100);
-            return discountValue.toLocaleString();
         }
     </script>
 </body>

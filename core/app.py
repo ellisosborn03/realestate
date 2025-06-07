@@ -39,17 +39,14 @@ def init_database():
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             address TEXT NOT NULL,
             distress_score INTEGER,
-            risk_level TEXT,
-            discount_potential TEXT,
-            property_value REAL,
-            confidence INTEGER,
             risk_factors TEXT,
             analysis_type TEXT,
             source_file TEXT,
             case_id TEXT,
             party_name TEXT,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            distress_explanation TEXT
+            distress_explanation TEXT,
+            property_value INTEGER
         )
     ''')
     
@@ -103,9 +100,8 @@ def get_properties():
     # Build query with filters
     query = '''
         SELECT 
-            id, address, distress_score, risk_level, discount_potential, 
-            property_value, confidence, risk_factors, analysis_type, 
-            source_file, case_id, party_name, created_at, distress_explanation
+            id, address, distress_score, risk_factors, analysis_type, 
+            source_file, case_id, party_name, created_at, distress_explanation, property_value
         FROM properties
         WHERE 1=1
     '''
@@ -126,24 +122,30 @@ def get_properties():
     
     properties = []
     for row in rows:
-        risk_factors = json.loads(row[7]) if row[7] else []
+        risk_factors = json.loads(row[3]) if row[3] else []
+        property_value = row[10] if len(row) > 10 and row[10] is not None else 0
         properties.append({
             'id': row[0],
             'address': row[1],
             'distress_score': row[2],
-            'risk_level': row[3],
-            'discount_potential': row[4],
-            'property_value': row[5],
-            'confidence': row[6],
             'risk_factors': risk_factors,
-            'analysis_type': row[8],
-            'source_file': row[9],
-            'case_id': row[10],
-            'party_name': row[11],
-            'created_at': row[12],
-            'distress_explanation': row[13]
+            'analysis_type': row[4],
+            'source_file': row[5],
+            'case_id': row[6],
+            'party_name': row[7],
+            'created_at': row[8],
+            'distress_explanation': row[9],
+            'property_value': property_value,
         })
     
+    # Add attom_available flag
+    for prop in properties:
+        prop['attom_available'] = bool(prop.get('property_value') or prop.get('attom_id'))
+
+    # Debug print: show the property id and dict for each property
+    for prop in properties:
+        print(f'\n[DEBUG] Property ID: {prop.get("id")} | Property dict: {prop}', flush=True)
+
     conn.close()
     return jsonify({'properties': properties})
 
@@ -171,7 +173,6 @@ def save_analysis():
         # Generate distress explanation with property data
         risk_factors = data.get('risk_factors', [])
         distress_score = data.get('distress_score', 0)
-        discount_potential = data.get('discount_potential', '0-0%')
         
         # Extract REAL property data from the analysis results
         property_data = {}
@@ -312,27 +313,23 @@ def save_analysis():
             if value_change < -5:  # Value declined more than 5%
                 property_data['declining_value'] = True
         
-        explanation = generate_distress_explanation(distress_score, discount_potential, risk_factors, property_data)
+        explanation = generate_distress_explanation(distress_score, risk_factors, property_data)
         
         cursor.execute('''
             INSERT INTO properties 
-            (address, distress_score, risk_level, discount_potential, property_value,
-             confidence, risk_factors, analysis_type, source_file, case_id, 
-             party_name, distress_explanation)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            (address, distress_score, risk_factors, analysis_type, source_file, case_id, 
+             party_name, distress_explanation, property_value)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
         ''', (
             data.get('address'),
             data.get('distress_score'),
-            data.get('risk_level'),
-            data.get('discount_potential'),
-            data.get('property_value'),
-            data.get('confidence'),
             json.dumps(data.get('risk_factors', [])),
             data.get('analysis_type', 'divorce'),
             data.get('source_file'),
             data.get('case_id'),
             data.get('party_name'),
-            explanation
+            explanation,
+            data.get('property_value', 0)
         ))
         
         conn.commit()
@@ -345,7 +342,7 @@ def save_analysis():
         logger.error(f"Error saving analysis: {e}")
         return jsonify({'success': False, 'error': str(e)}), 500
 
-def generate_distress_explanation(distress_score, discount_potential, risk_factors, property_data=None):
+def generate_distress_explanation(distress_score, risk_factors, property_data=None):
     """Generate concise explanation based on real property data and distress factors"""
     
     # Extract real metrics from property data if available
@@ -547,15 +544,15 @@ def generate_distress_explanation(distress_score, discount_potential, risk_facto
     
     # Create more varied explanation based on distress level
     if distress_score >= 85:
-        explanation = f"CRITICAL {discount_potential} opportunity from {', '.join(all_factors[:4])}."
+        explanation = f"CRITICAL opportunity from {', '.join(all_factors[:4])}."
     elif distress_score >= 70:
-        explanation = f"HIGH {discount_potential} potential from {', '.join(all_factors[:4])}."
+        explanation = f"HIGH potential from {', '.join(all_factors[:4])}."
     elif distress_score >= 55:
-        explanation = f"MODERATE {discount_potential} discount from {', '.join(all_factors[:3])}."
+        explanation = f"MODERATE discount from {', '.join(all_factors[:3])}."
     elif all_factors:
-        explanation = f"{discount_potential} discount from {', '.join(all_factors[:3])}."
+        explanation = f"discount from {', '.join(all_factors[:3])}."
     else:
-        explanation = f"{discount_potential} potential based on divorce proceedings."
+        explanation = f"potential based on divorce proceedings."
     
     return explanation
 
@@ -819,8 +816,8 @@ def distress_single():
 
 if __name__ == '__main__':
     try:
-        # Always run on port 5001 for local dev
-        run_simple('127.0.0.1', 5001, app, use_debugger=True, use_reloader=True)
+        port = int(os.environ.get('PORT', 5001))
+        run_simple('127.0.0.1', port, app, use_debugger=True, use_reloader=True)
     except Exception as e:
         logger.error(f"Failed to start server: {str(e)}")
         logger.error(traceback.format_exc()) 

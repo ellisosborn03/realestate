@@ -1,0 +1,40 @@
+{
+  "raw_data": {
+    "address": "123 Test St, Miami, FL 33101",
+    "timestamp": "2025-06-03T09:36:49.603994",
+    "ltv": null,
+    "dom": null,
+    "medianDom": null,
+    "listOrig": null,
+    "listCurr": null,
+    "preFC": false,
+    "taxDelinq": false,
+    "taxLienLate": false,
+    "absentee": false,
+    "liens": false,
+    "viol": 0,
+    "absorp": null,
+    "rentDemand": null,
+    "incomeTrend": null,
+    "ownerAge": null,
+    "propAge": null,
+    "criticalIllness": false,
+    "incompleteConstruction": false,
+    "crime": "High",
+    "insurance": "Full",
+    "layoffs": false,
+    "coastalRisk": "Medium",
+    "sources": [
+      "CRIME_API",
+      "COASTAL_RISK",
+      "FEMA_NFIP"
+    ]
+  },
+  "ai_analysis": {
+    "score": 50,
+    "conf": 0.5,
+    "discount": "10-15%",
+    "reason": "Fallback scoring due to Groq analysis failure"
+  },
+  "combined_score": 50
+}

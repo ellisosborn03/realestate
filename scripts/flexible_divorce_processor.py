@@ -122,10 +122,6 @@ def save_to_database(result, source_file):
         data = {
             'address': result.get('address'),
             'distress_score': result.get('distress_score'),
-            'risk_level': result.get('risk_level'),
-            'discount_potential': result.get('discount_potential'),
-            'property_value': result.get('property_value', 0),
-            'confidence': result.get('confidence'),
             'risk_factors': result.get('risk_factors', []),
             'analysis_type': 'divorce',
             'source_file': source_file,
@@ -302,8 +298,7 @@ def process_flexible_divorce_excel(file_path, max_properties=0):
             for i, lead in enumerate(sorted_leads[:3]):
                 score = lead.get("distress_score", 0)
                 value = lead.get("property_value", 0)
-                discount = lead.get("discount_potential", "N/A")
-                print(f"  {i+1}. Score {score}/100 | ${value:,} | {discount}")
+                print(f"  {i+1}. Score {score}/100 | ${value:,}")
                 print(f"     {lead['address']}")
         
         # Save results
