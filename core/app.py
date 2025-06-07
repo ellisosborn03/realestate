@@ -45,7 +45,8 @@ def init_database():
             case_id TEXT,
             party_name TEXT,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            distress_explanation TEXT
+            distress_explanation TEXT,
+            property_value INTEGER
         )
     ''')
     
@@ -100,7 +101,7 @@ def get_properties():
     query = '''
         SELECT 
             id, address, distress_score, risk_factors, analysis_type, 
-            source_file, case_id, party_name, created_at, distress_explanation
+            source_file, case_id, party_name, created_at, distress_explanation, property_value
         FROM properties
         WHERE 1=1
     '''
@@ -122,7 +123,7 @@ def get_properties():
     properties = []
     for row in rows:
         risk_factors = json.loads(row[3]) if row[3] else []
-        property_value = 0  # No DB column, so always 0 for now
+        property_value = row[10] if len(row) > 10 and row[10] is not None else 0
         properties.append({
             'id': row[0],
             'address': row[1],
@@ -317,8 +318,8 @@ def save_analysis():
         cursor.execute('''
             INSERT INTO properties 
             (address, distress_score, risk_factors, analysis_type, source_file, case_id, 
-             party_name, distress_explanation)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+             party_name, distress_explanation, property_value)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
         ''', (
             data.get('address'),
             data.get('distress_score'),
@@ -327,7 +328,8 @@ def save_analysis():
             data.get('source_file'),
             data.get('case_id'),
             data.get('party_name'),
-            explanation
+            explanation,
+            data.get('property_value', 0)
         ))
         
         conn.commit()
