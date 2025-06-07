@@ -183,7 +183,7 @@ async def analyze_address(address_line, client):
     # 12. Hazard area (not implemented)
     result['distress_score'] = score
     result['flags'] = ', '.join(flags)
-    result['discount'] = f"{min(30, score*2)}%"
+    result['confidence'] = f"{min(30, score*2)}%"
     return result
 
 st.set_page_config(page_title="Divorce Case Distress Scoring", layout="wide")

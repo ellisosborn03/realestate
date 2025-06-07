@@ -242,229 +242,102 @@ class DivorceLeadAnalyzer:
         return signals
     
     def calculate_divorce_distress_score(self, signals: DivorceDistressSignals, property_data: Dict) -> Dict:
-        """Calculate enhanced divorce-specific distress score with real data"""
+        """Calculate divorce-specific distress score using new weighted system"""
         print("📊 Calculating enhanced divorce distress score...")
-        
-        score = 25  # Base score for any divorce case
-        risk_factors = ["Active divorce proceedings"]
-        
-        # DIVORCE-SPECIFIC HIGH IMPACT FACTORS (50% of total score)
-        
-        # Forced sale scenarios (20 points)
+
+        # New risk factor table (no 'Active divorce proceedings')
+        risk_factors = []
+        weights = {
+            'court_ordered_sale_timeline': 5,
+            'dual_mortgage_obligations': 4,
+            'high_legal_fee_burden': 4,
+            'child_support_obligations': 3,
+            'spousal_support_orders': 3,
+            'contested_divorce_case': 3,
+            'extended_case_duration_18mo': 3,
+            'required_equity_split': 2,
+            'high_value_property': 2,
+            'buyers_market_conditions': 2,
+            'urgent_sale_deadline_90d': 2,
+            'seasonal_timing_challenges': 1,
+            'property_over_30_years': 1,
+            'flood_or_coastal_risk': 1,
+        }
+        # Map signals/property_data to risk factors
+        triggered = []
+        # 1. Court-ordered sale timeline
         if signals.forced_sale_timeline:
-            score += 20
-            risk_factors.append("Court-ordered sale timeline")
-        
-        # Financial pressure multipliers (15 points)
+            triggered.append(('court_ordered_sale_timeline', weights['court_ordered_sale_timeline']))
+            risk_factors.append('Court-ordered sale timeline')
+        # 2. Dual mortgage obligations
         if signals.dual_mortgage_likely:
-            score += 8
-            risk_factors.append("Dual mortgage obligations")
-        
+            triggered.append(('dual_mortgage_obligations', weights['dual_mortgage_obligations']))
+            risk_factors.append('Dual mortgage obligations')
+        # 3. High legal fee burden
         if signals.legal_fee_burden:
-            score += 7
-            risk_factors.append("High legal fee burden ($15k+)")
-        
-        # Child/spousal support obligations (15 points)
+            triggered.append(('high_legal_fee_burden', weights['high_legal_fee_burden']))
+            risk_factors.append('High legal fee burden ($15k+)')
+        # 4. Child support obligations
         if signals.child_support_obligations:
-            score += 8
-            risk_factors.append("Child support obligations")
-        
+            triggered.append(('child_support_obligations', weights['child_support_obligations']))
+            risk_factors.append('Child support obligations')
+        # 5. Spousal support orders
         if signals.spousal_support_orders:
-            score += 7
-            risk_factors.append("Spousal support orders")
-        
-        # Case complexity factors (10 points)
+            triggered.append(('spousal_support_orders', weights['spousal_support_orders']))
+            risk_factors.append('Spousal support orders')
+        # 6. Contested divorce case
         if signals.divorce_case_type == "contested":
-            score += 6
-            risk_factors.append("Contested divorce case")
-        
-        if signals.case_duration_months > 12:
-            score += 4
-            risk_factors.append(f"Extended case duration ({signals.case_duration_months} months)")
-        
-        # PROPERTY-SPECIFIC FACTORS FROM REAL DATA (30% of total score)
-        
+            triggered.append(('contested_divorce_case', weights['contested_divorce_case']))
+            risk_factors.append('Contested divorce case')
+        # 7. Extended case duration (18 months)
+        if signals.case_duration_months >= 18:
+            triggered.append(('extended_case_duration_18mo', weights['extended_case_duration_18mo']))
+            risk_factors.append('Extended case duration (18 months)')
+        # 8. Required equity split
+        if signals.equity_split_required:
+            triggered.append(('required_equity_split', weights['required_equity_split']))
+            risk_factors.append('Required equity split')
+        # 9. High-value property (>$500k)
         property_value = property_data.get("current_value", 0)
-        if property_value > 0:
-            signals.property_value = property_value
-            
-            # High-value homes = higher legal/tax implications
-            if property_value > 500000:
-                score += 5
-                risk_factors.append("High-value property (>$500k)")
-            
-            # Equity split complexity
-            if signals.equity_split_required:
-                score += 6
-                risk_factors.append("Required equity split")
-        
-        # REAL PROPERTY AGE AND CONDITION FACTORS (10 points)
+        if property_value > 500000:
+            triggered.append(('high_value_property', weights['high_value_property']))
+            risk_factors.append('High-value property (>$500k)')
+        # 10. Buyer's market conditions
+        if signals.market_conditions_favor_buyer:
+            triggered.append(('buyers_market_conditions', weights['buyers_market_conditions']))
+            risk_factors.append("Buyer's market conditions")
+        # 11. Urgent sale deadline (90 days)
+        if 0 < signals.court_ordered_sale_deadline <= 90:
+            triggered.append(('urgent_sale_deadline_90d', weights['urgent_sale_deadline_90d']))
+            risk_factors.append('Urgent sale deadline (90 days)')
+        # 12. Seasonal timing challenges
+        if signals.seasonal_timing_poor:
+            triggered.append(('seasonal_timing_challenges', weights['seasonal_timing_challenges']))
+            risk_factors.append('Seasonal timing challenges')
+        # 13. Property >30 years old
         year_built = property_data.get("year_built", 0)
-        current_year = 2024
         if year_built > 0:
-            property_age = current_year - year_built
+            property_age = 2024 - year_built
             if property_age > 30:
-                score += 5
-                risk_factors.append(f"Older property ({property_age} years)")
-                signals.building_age_risk = True
-            
-            if property_age > 50:
-                score += 3
-                risk_factors.append("High maintenance risk property")
-        
-        # OWNER OCCUPANCY STATUS (8 points)
-        if not property_data.get("owner_occupied", True):
-            score += 8
-            risk_factors.append("Non-owner occupied (absentee owner)")
-        
-        # TAX LIEN AND ASSESSMENT FACTORS (12 points)
-        tax_amount = property_data.get("tax_amount", 0)
-        assessed_value = property_data.get("assessed_value", 0)
-        
-        if tax_amount > 0 and assessed_value > 0:
-            tax_rate = (tax_amount / assessed_value) * 100
-            if tax_rate > 3.0:  # High tax rate indicating distress
-                score += 6
-                risk_factors.append(f"High tax burden ({tax_rate:.1f}%)")
-        
-        if property_data.get("tax_year", 0) < current_year - 1:
-            score += 6
-            risk_factors.append("Potential tax delinquency")
-        
-        # SALES HISTORY AND MARKET ACTIVITY (10 points)
-        sales_count = property_data.get("sales_history_count", 0)
-        if sales_count > 3:  # Frequent turnover indicates issues
-            score += 4
-            risk_factors.append("Frequent property turnover")
-        
-        last_sale_date = property_data.get("last_sale_date", "")
-        if last_sale_date:
-            try:
-                import datetime
-                sale_date = datetime.datetime.strptime(last_sale_date, "%Y-%m-%d")
-                days_since_sale = (datetime.datetime.now() - sale_date).days
-                
-                if days_since_sale < 365:  # Recent purchase may indicate flip
-                    score += 3
-                    risk_factors.append("Recent purchase (potential flip)")
-                elif days_since_sale > 3650:  # Long ownership, emotional attachment
-                    score += 2
-                    risk_factors.append("Long-term ownership (emotional attachment)")
-            except:
-                pass
-        
-        # PRICE APPRECIATION TRENDS (8 points)
-        price_appreciation = property_data.get("price_appreciation", 0)
-        if price_appreciation < -10:  # Declining value
-            score += 8
-            risk_factors.append(f"Declining property value ({price_appreciation:.1f}%)")
-        elif price_appreciation < 0:
-            score += 4
-            risk_factors.append("Negative price appreciation")
-        
-        # AVM CONFIDENCE AND VALUE RANGE (6 points)
-        confidence_score = property_data.get("confidence_score", 0)
-        if confidence_score < 70:  # Low confidence indicates uncertainty
-            score += 3
-            risk_factors.append("Property valuation uncertainty")
-        
-        value_high = property_data.get("value_high", 0)
-        value_low = property_data.get("value_low", 0)
-        if value_high > 0 and value_low > 0:
-            value_range = ((value_high - value_low) / property_value) * 100
-            if value_range > 20:  # Wide valuation range
-                score += 3
-                risk_factors.append("Wide property value range")
-        
-        # MARKET TIMING FACTORS (10% of total score)
-        
-        # Extract ZIP for market analysis
-        zip_match = re.search(r'\b(\d{5})\b', signals.address)
-        if zip_match:
-            zip_code = zip_match.group(1)
-            
-            # Florida market conditions affecting divorce sales
-            florida_divorce_markets = {
-                "33403": {"buyer_market": False, "slow_season": False, "absorption_days": 45},  # Lake Park
-                "33463": {"buyer_market": False, "slow_season": False, "absorption_days": 35},  # Greenacres
-                "33418": {"buyer_market": True, "slow_season": True, "absorption_days": 85},   # PB Gardens
-                "33467": {"buyer_market": True, "slow_season": True, "absorption_days": 95},   # Lake Worth
-                "33460": {"buyer_market": True, "slow_season": True, "absorption_days": 90},   # Lake Worth
-            }
-            
-            market_info = florida_divorce_markets.get(zip_code, 
-                {"buyer_market": True, "slow_season": False, "absorption_days": 75})
-            
-            if market_info["buyer_market"]:
-                score += 6
-                risk_factors.append("Buyer's market conditions")
-                signals.market_conditions_favor_buyer = True
-            
-            if market_info["slow_season"]:
-                score += 4
-                risk_factors.append("Seasonal timing challenges")
-                signals.seasonal_timing_poor = True
-                
-            # Market absorption rate (days on market expectation)
-            expected_dom = market_info["absorption_days"]
-            if expected_dom > 75:
-                score += 3
-                risk_factors.append(f"Slow market absorption ({expected_dom} days)")
-                signals.market_absorption_rate = expected_dom / 30  # Convert to months
-        
-        # DESPERATION MULTIPLIERS (10% of total score)
-        
-        # Time pressure creates desperation
-        if signals.court_ordered_sale_deadline > 0 and signals.court_ordered_sale_deadline < 120:
-            score += 10
-            risk_factors.append(f"Urgent sale deadline ({signals.court_ordered_sale_deadline} days)")
-        
-        # Multiple children = higher urgency for resolution
-        if signals.children_involved and signals.case_duration_months > 18:
-            score += 8
-            risk_factors.append("Extended divorce with children involved")
-        
-        # Property value vs debt stress
-        last_sale_price = property_data.get("last_sale_price", 0)
-        if last_sale_price > 0 and property_value > 0:
-            if property_value < last_sale_price * 0.95:  # Underwater or losing equity
-                score += 6
-                risk_factors.append("Potential underwater mortgage")
-                signals.underwater_mortgage = True
-        
-        # Cap at 100
-        final_score = min(score, 100)
-        
-        # Risk level determination (more aggressive for divorce)
-        if final_score >= 85:
-            risk_level = "CRITICAL"
-            discount_potential = "25-35%"
-        elif final_score >= 70:
-            risk_level = "HIGH"
-            discount_potential = "15-25%"
-        elif final_score >= 55:
-            risk_level = "MEDIUM-HIGH"
-            discount_potential = "10-20%"
-        elif final_score >= 40:
-            risk_level = "MEDIUM"
-            discount_potential = "5-15%"
-        else:
-            risk_level = "LOW"
-            discount_potential = "0-10%"
-        
+                triggered.append(('property_over_30_years', weights['property_over_30_years']))
+                risk_factors.append('Property >30 years old')
+        # 14. Flood or coastal risk (use property_data['flood_or_coastal_risk'] or similar)
+        if property_data.get('flood_or_coastal_risk', False):
+            triggered.append(('flood_or_coastal_risk', weights['flood_or_coastal_risk']))
+            risk_factors.append('Flood or coastal risk')
+        # Calculate score
+        total_weight = sum(weights.values())
+        triggered_weight = sum(w for _, w in triggered)
+        distress_score = round((triggered_weight / total_weight) * 100) if total_weight else 0
+        # Debug
+        print(f"[DEBUG] Triggered: {triggered}")
+        print(f"[DEBUG] Score: {distress_score}/100")
         return {
-            "distress_score": final_score,
-            "risk_level": risk_level,
-            "discount_potential": discount_potential,
+            "distress_score": distress_score,
             "risk_factors": risk_factors,
-            "total_factors": len(risk_factors),
-            "confidence": min(95, 70 + len(risk_factors) * 2),  # High confidence with real data
-            "urgency": "HIGH" if signals.court_ordered_sale_deadline < 90 else "MEDIUM",
+            "confidence": 95,
             "property_value": property_value,
             "year_built": year_built,
-            "tax_liens": tax_amount,
-            "days_on_market": 0,  # To be enhanced with listing data
-            "price_reductions": 0,  # To be enhanced with listing data
         }
     
     def analyze_divorce_lead(self, address: str, case_data: Dict = None) -> Dict:
@@ -496,49 +369,22 @@ class DivorceLeadAnalyzer:
         
         # Display results
         score = result["distress_score"]
-        risk_level = result["risk_level"]
-        discount_potential = result["discount_potential"]
-        urgency = result["urgency"]
-        
-        # Risk level emoji
-        risk_emojis = {
-            "CRITICAL": "🔴🚨",
-            "HIGH": "🔴",
-            "MEDIUM-HIGH": "🟠",
-            "MEDIUM": "🟡",
-            "LOW": "🟢"
-        }
-        
-        emoji = risk_emojis.get(risk_level, "⚪")
+        risk_factors = result["risk_factors"]
         
         print(f"\n📊 DIVORCE DISTRESS ANALYSIS:")
-        print(f"   {emoji} Distress Score: {score}/100")
-        print(f"   {emoji} Risk Level: {risk_level}")
-        print(f"   💰 Discount Potential: {discount_potential}")
-        print(f"   ⏰ Urgency Level: {urgency}")
-        print(f"   🎯 Confidence: {result['confidence']}%")
+        print(f"   Distress Score: {score}/100")
         
         print(f"\n💔 DIVORCE-SPECIFIC FACTORS:")
-        print(f"   Case Type: {divorce_signals.divorce_case_type.title()}")
-        print(f"   Children Involved: {divorce_signals.children_involved}")
-        print(f"   Case Duration: {divorce_signals.case_duration_months} months")
-        print(f"   Forced Sale Timeline: {divorce_signals.forced_sale_timeline}")
-        
-        if result['risk_factors']:
-            print(f"\n⚠️  DISTRESS INDICATORS:")
-            for factor in result['risk_factors']:
-                print(f"   • {factor}")
+        for factor in risk_factors:
+            print(f"   • {factor}")
         
         return {
             "address": address,
             "distress_score": score,
-            "risk_level": risk_level,
-            "discount_potential": discount_potential,
-            "urgency": urgency,
+            "risk_factors": risk_factors,
             "confidence": result['confidence'],
-            "risk_factors": result['risk_factors'],
             "property_value": property_data.get('current_value', 0),
-            "divorce_signals": asdict(divorce_signals),
+            "year_built": property_data.get('year_built', 0),
             "status": "success"
         }
     
@@ -643,8 +489,7 @@ def main():
         for lead in high_priority:
             score = lead.get("distress_score", 0)
             discount = lead.get("discount_potential", "N/A")
-            urgency = lead.get("urgency", "N/A")
-            print(f"  Score {score}/100 | Discount: {discount} | Urgency: {urgency}")
+            print(f"  Score {score}/100 | Discount: {discount}")
             print(f"    {lead['address']}")
 
 if __name__ == "__main__":

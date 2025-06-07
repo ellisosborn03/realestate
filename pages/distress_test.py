@@ -205,7 +205,6 @@ async def analyze_row(row: dict, client: httpx.AsyncClient) -> dict:
     # ---
     result['distress_score'] = score
     result['flags'] = ', '.join(flags)
-    result['discount'] = f"{min(30, score*2)}%"
     return result
 
 # --- Streamlit UI ---

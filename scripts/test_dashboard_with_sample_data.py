@@ -11,9 +11,6 @@ def populate_sample_data():
         {
             'address': '254 SHORE COURT, FORT LAUDERDALE, FL 33308',
             'distress_score': 100,
-            'risk_level': 'CRITICAL',
-            'discount_potential': '25-35%',
-            'property_value': 1750250,
             'confidence': 95,
             'risk_factors': [
                 "Active divorce proceedings",
@@ -37,9 +34,6 @@ def populate_sample_data():
         {
             'address': '6775 TURTLE POINT DR, Lake Worth, FL 33467',
             'distress_score': 98,
-            'risk_level': 'CRITICAL',
-            'discount_potential': '25-35%',
-            'property_value': 802326,
             'confidence': 94,
             'risk_factors': [
                 "Active divorce proceedings",
@@ -63,9 +57,6 @@ def populate_sample_data():
         {
             'address': '5103 NORTH OCEAN BLVD, OCEAN RIDGE, FL 33435',
             'distress_score': 95,
-            'risk_level': 'CRITICAL',
-            'discount_potential': '25-35%',
-            'property_value': 1161804,
             'confidence': 93,
             'risk_factors': [
                 "Active divorce proceedings",
@@ -87,9 +78,6 @@ def populate_sample_data():
         {
             'address': '123 PALM AVENUE, WEST PALM BEACH, FL 33401',
             'distress_score': 75,
-            'risk_level': 'HIGH',
-            'discount_potential': '15-25%',
-            'property_value': 450000,
             'confidence': 85,
             'risk_factors': [
                 "Extended time on market (120 days)",
@@ -106,9 +94,6 @@ def populate_sample_data():
         {
             'address': '5060 PALM HILL DR, WEST PALM BEACH, FL 33415',
             'distress_score': 88,
-            'risk_level': 'HIGH',
-            'discount_potential': '20-30%',
-            'property_value': 325000,
             'confidence': 89,
             'risk_factors': [
                 "Active divorce proceedings",
@@ -126,9 +111,6 @@ def populate_sample_data():
         {
             'address': '789 SUNSET BOULEVARD, BOCA RATON, FL 33432',
             'distress_score': 62,
-            'risk_level': 'MEDIUM-HIGH',
-            'discount_potential': '10-20%',
-            'property_value': 675000,
             'confidence': 78,
             'risk_factors': [
                 "Building >30 years old (Florida risk)",
@@ -144,9 +126,6 @@ def populate_sample_data():
         {
             'address': '456 LAKE VIEW DRIVE, DELRAY BEACH, FL 33444',
             'distress_score': 45,
-            'risk_level': 'MEDIUM',
-            'discount_potential': '5-15%',
-            'property_value': 550000,
             'confidence': 72,
             'risk_factors': [
                 "Building >30 years old (Florida risk)",
@@ -160,9 +139,6 @@ def populate_sample_data():
         {
             'address': '321 MARINA POINT, FORT LAUDERDALE, FL 33316',
             'distress_score': 28,
-            'risk_level': 'LOW',
-            'discount_potential': '0-10%',
-            'property_value': 850000,
             'confidence': 65,
             'risk_factors': [
                 "Coastal insurance risk"
@@ -182,7 +158,7 @@ def populate_sample_data():
     
     for i, property_data in enumerate(sample_properties):
         print(f"\n[{i+1}/{len(sample_properties)}] Saving: {property_data['address']}")
-        print(f"   Score: {property_data['distress_score']}/100 | Risk: {property_data['risk_level']}")
+        print(f"   Score: {property_data['distress_score']}/100 | Confidence: {property_data['confidence']}%")
         
         try:
             response = requests.post(f'{base_url}/api/save-analysis', json=property_data, timeout=10)
@@ -229,9 +205,8 @@ def populate_sample_data():
         sorted_props = sorted(sample_properties, key=lambda x: x['distress_score'], reverse=True)
         for i, prop in enumerate(sorted_props[:3]):
             value = prop['property_value']
-            discount = prop['discount_potential']
             print(f"   {i+1}. {prop['address']}")
-            print(f"      Score: {prop['distress_score']}/100 | Value: ${value:,} | Discount: {discount}")
+            print(f"      Score: {prop['distress_score']}/100 | Value: ${value:,}")
 
 if __name__ == "__main__":
     populate_sample_data() 

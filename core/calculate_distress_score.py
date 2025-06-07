@@ -2,8 +2,8 @@
 
 def calculateDistressScore(data):
     """
-    Calculate distress score as a weighted percentage based on predefined signal weights.
-    Backward compatible: checks both old and new field names.
+    Calculate distress score as a weighted percentage based on the new risk factor table.
+    Only output distress_score (X/100) and confidence. No discount bands.
     """
     def get_bool(*keys):
         for k in keys:
@@ -17,23 +17,20 @@ def calculateDistressScore(data):
             if v is not None: return v
         return default
     signals = [
-        (get_bool('preforeclosure', 'preforeclosureActive'), 5),
-        (get_bool('below_avm_sale', 'belowAVMSale'), 4),
-        (get_num('days_on_market', 'daysOnMarket', default=0) > 90, 4),
-        (get_bool('frequent_price_drops', 'frequentPriceDrops'), 4),
-        (get_bool('tax_delinquent', 'taxDelinquent'), 4),
-        (get_num('building_age', 'buildingAge', default=0) > 30, 3),
-        (get_num('tax_to_value', 'taxToValue', default=0) > 0.03, 3),
-        (get_bool('no_permits_5yr', 'noPermits5yr'), 3),
-        (get_num('ownership_years', 'ownershipYears', default=0) > 15, 3),
-        (get_num('crime_index', 'crimeIndex', default=0) > 70, 3),
-        (get_num('median_income', 'medianIncome', default=1e6) < 50000, 3),
-        (get_num('vacancy_rate', 'vacancyRate', default=0) > 10, 2),
-        (get_num('unemployment', 'unemploymentRate', default=0) > 8, 2),
-        (get_bool('hazard_area', 'hazardArea'), 2),
-        (get_bool('rent_below_mortgage', 'rentBelowMortgage'), 2),
-        (get_bool('missing_unit_number', 'missingUnitNumber'), 1),
-        (get_bool('absentee_owner', 'absenteeOwner'), 1),
+        (get_bool('court_ordered_sale_timeline'), 5),
+        (get_bool('dual_mortgage_obligations'), 4),
+        (get_bool('high_legal_fee_burden'), 4),
+        (get_bool('child_support_obligations'), 3),
+        (get_bool('spousal_support_orders'), 3),
+        (get_bool('contested_divorce_case'), 3),
+        (get_bool('extended_case_duration_18mo'), 3),
+        (get_bool('required_equity_split'), 2),
+        (get_bool('high_value_property'), 2),
+        (get_bool('buyers_market_conditions'), 2),
+        (get_bool('urgent_sale_deadline_90d'), 2),
+        (get_bool('seasonal_timing_challenges'), 1),
+        (get_bool('property_over_30_years'), 1),
+        (get_bool('flood_or_coastal_risk'), 1),
     ]
     # Debug print for first property
     import os
