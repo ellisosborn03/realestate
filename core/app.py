@@ -121,18 +121,20 @@ def get_properties():
     
     properties = []
     for row in rows:
-        risk_factors = json.loads(row[7]) if row[7] else []
+        risk_factors = json.loads(row[3]) if row[3] else []
+        property_value = 0  # No DB column, so always 0 for now
         properties.append({
             'id': row[0],
             'address': row[1],
             'distress_score': row[2],
             'risk_factors': risk_factors,
-            'analysis_type': row[8],
-            'source_file': row[9],
-            'case_id': row[10],
-            'party_name': row[11],
-            'created_at': row[12],
-            'distress_explanation': row[13]
+            'analysis_type': row[4],
+            'source_file': row[5],
+            'case_id': row[6],
+            'party_name': row[7],
+            'created_at': row[8],
+            'distress_explanation': row[9],
+            'property_value': property_value,
         })
     
     # Add attom_available flag

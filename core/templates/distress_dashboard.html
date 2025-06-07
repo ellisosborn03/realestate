@@ -222,16 +222,14 @@
                                 <tr>
                                     <th>Address</th>
                                     <th>Distress Score</th>
-                                    <th>Risk Level</th>
                                     <th>Property Value</th>
-                                    <th>Discount Potential</th>
                                     <th>Explanation</th>
                                     <th>Source</th>
                                 </tr>
                             </thead>
                             <tbody id="propertiesTableBody">
                                 <tr>
-                                    <td colspan="7" class="text-center text-muted p-4">
+                                    <td colspan="5" class="text-center text-muted p-4">
                                         No properties found. Upload and analyze some data first.
                                     </td>
                                 </tr>
@@ -365,7 +363,7 @@
                 console.error('Error loading properties:', error);
                 document.getElementById('propertiesTableBody').innerHTML = `
                     <tr>
-                        <td colspan="7" class="text-center text-danger p-4">
+                        <td colspan="5" class="text-center text-danger p-4">
                             <i class="fas fa-exclamation-triangle me-2"></i>
                             Error loading properties: ${error.message}
                         </td>
@@ -402,7 +400,7 @@
             if (propsToShow.length === 0) {
                 tbody.innerHTML = `
                     <tr>
-                        <td colspan="7" class="text-center text-muted p-4">
+                        <td colspan="5" class="text-center text-muted p-4">
                             No properties match the current filters.
                         </td>
                     </tr>
@@ -410,41 +408,25 @@
                 return;
             }
             tbody.innerHTML = propsToShow.map(property => {
-                const riskClass = property.attom_available ? 
-                    `risk-${property.risk_level?.toLowerCase().replace('-', '-')}` : '';
                 const valueDisplay = property.attom_available && property.property_value > 0 ? 
                     `$${property.property_value.toLocaleString()}` : 'N/A';
                 const distressScore = property.attom_available ? 
                     `${property.distress_score}/100` : 'N/A';
-                const riskLevel = property.attom_available ? 
-                    `<span class="risk-badge ${riskClass}">${property.risk_level}</span>` : 'N/A';
-                const discountPotential = property.attom_available ? 
-                    `<strong>${property.discount_potential}</strong>` : 'N/A';
                 const explanation = property.attom_available ? 
                     property.distress_explanation || 'No explanation available' : 
                     'Address not found in ATTOM database';
-                
                 return `
                     <tr>
                         <td>
-                            <div>
-                                <strong>${property.address}</strong>
-                                ${property.case_id ? `<br><small class="text-muted">Case: ${property.case_id}</small>` : ''}
-                                ${property.party_name ? `<br><small class="text-muted">Party: ${property.party_name}</small>` : ''}
-                            </div>
+                            <strong>${property.address}</strong>
+                            ${property.case_id ? `<br><small class="text-muted">Case: ${property.case_id}</small>` : ''}
+                            ${property.party_name ? `<br><small class="text-muted">Party: ${property.party_name}</small>` : ''}
                         </td>
                         <td>
                             <span class="distress-score">${distressScore}</span>
                             ${property.attom_available ? `<br><small class="text-muted">${property.confidence}% confidence</small>` : ''}
                         </td>
-                        <td>${riskLevel}</td>
                         <td class="property-value">${valueDisplay}</td>
-                        <td>
-                            ${discountPotential}
-                            ${property.attom_available && property.property_value > 0 ? 
-                                `<br><small class="text-success">$${calculateDiscountValue(property)}</small>` : ''
-                            }
-                        </td>
                         <td>
                             <div class="explanation-text">
                                 ${explanation}
@@ -454,26 +436,12 @@
                             <small class="text-muted">
                                 ${property.source_file || 'Unknown'}
                                 <br>${property.analysis_type || 'general'}
-                                <br>${new Date(property.created_at).toLocaleDateString()}
+                                <br>${property.created_at ? new Date(property.created_at).toLocaleDateString() : ''}
                             </small>
                         </td>
                     </tr>
                 `;
             }).join('');
-        }
-
-        function calculateDiscountValue(property) {
-            if (!property.property_value || !property.discount_potential) return '0';
-            
-            const match = property.discount_potential.match(/(\d+)-(\d+)%/);
-            if (!match) return '0';
-            
-            const minDiscount = parseInt(match[1]);
-            const maxDiscount = parseInt(match[2]);
-            const avgDiscount = (minDiscount + maxDiscount) / 2;
-            
-            const discountValue = property.property_value * (avgDiscount / 100);
-            return discountValue.toLocaleString();
         }
     </script>
 </body>
